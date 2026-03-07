@@ -11,26 +11,18 @@ import io
 # ==============================================================================
 st.set_page_config(page_title="Prépa LAS 1 - IA Premium", page_icon="🎓", layout="wide")
 
-# CSS personnalisé pour embellir l'interface (Fond NOIR et texte BLANC pour la synthèse)
 st.markdown("""
 <style>
     .stTabs [data-baseweb="tab-list"] { gap: 20px; }
     .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: #f0f2f6; border-radius: 10px 10px 0 0; padding: 10px 20px; }
     .stTabs [aria-selected="true"] { background-color: #ff4b4b; color: white; font-weight: bold; }
-    .synth-box { 
-        padding: 20px; 
-        background-color: #000000; 
-        color: #ffffff; 
-        border-left: 5px solid #ff4b4b; 
-        border-radius: 8px; 
-        margin-bottom: 20px; 
-    }
+    .synth-box { padding: 20px; background-color: #000000; color: #ffffff; border-left: 5px solid #ff4b4b; border-radius: 8px; margin-bottom: 20px; }
     .synth-box h3 { color: #ffffff; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Le Prompt Dynamique (Avec Mode Examen)
+# 2. Le Prompt Dynamique
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur d'Université intraitable, expert en rédaction de sujets de concours de santé (LAS 1 / PASS).
@@ -39,29 +31,13 @@ Niveau de difficulté : {difficulte}/10
 Nombre de questions : {nombre_qcm}
 Mode Examen activé : {mode_examen}
 
-Directives selon le mode :
-- Si Mode Examen = "OUI" : Pose UNIQUEMENT des questions "High Yield" (très probables au concours). Utilise des tournures ambiguës, piège sur des détails infimes, des unités, ou des inversions de schémas. Le niveau doit être maximal.
-- Si Mode Examen = "NON" : Fais des questions d'entraînement classiques pour bien comprendre le cours.
+Directives :
+- Si Mode Examen = "OUI" : Pose UNIQUEMENT des questions "High Yield" (probables au concours). Utilise des tournures ambiguës, piège sur des détails infimes, ou des inversions de schémas.
+- Si Mode Examen = "NON" : Fais des questions d'entraînement classiques.
 
-Analyse les documents fournis (images de cours/schémas).
-
-Tâche 1 : Rédige une FICHE DE SYNTHÈSE (3 à 5 points absolument cruciaux à retenir).
-Tâche 2 : Génère {nombre_qcm} QCM/QCU à 5 options (A, B, C, D, E).
-
-TU DOIS OBLIGATOIREMENT RÉPONDRE UNIQUEMENT SOUS FORME DE JSON VALIDE, avec cette structure exacte :
-{{
-  "fiche_synthese": "Le résumé clair et structuré du cours ici...",
-  "qcm": [
-    {{
-      "question": "Énoncé de la question",
-      "options": {{
-        "A": "Proposition A", "B": "Proposition B", "C": "Proposition C", "D": "Proposition D", "E": "Proposition E"
-      }},
-      "reponses_correctes": ["A", "C"],
-      "explication": "Explication détaillée de chaque option."
-    }}
-  ]
-}}
+Analyse les documents fournis.
+Rédige une "fiche_synthese" (3 à 5 points cruciaux).
+Génère {nombre_qcm} questions "qcm" à 5 options (A, B, C, D, E).
 """
 
 # ==============================================================================
@@ -85,32 +61,30 @@ def extraire_images_pdf(buffer_fichier, page_debut, page_fin, resolution_dpi=150
 def generer_qcm_gemini(images, matiere, difficulte, nombre_qcm, est_mode_examen):
     etat_examen = "OUI" if est_mode_examen else "NON"
     prompt_final = SYSTEM_PROMPT.format(
-        matiere=matiere, 
-        difficulte=difficulte, 
-        nombre_qcm=nombre_qcm,
-        mode_examen=etat_examen
+        matiere=matiere, difficulte=difficulte, 
+        nombre_qcm=nombre_qcm, mode_examen=etat_examen
     )
     
     contenu_requete = [prompt_final] + images
+    model = genai.GenerativeModel('gemini-1.5-flash')
     
-    # Utilisation du modèle valide
-    model = genai.GenerativeModel('gemini-2.5-flash')
-    reponse = model.generate_content(contenu_requete)
-    
-    texte_json = reponse.text.strip()
-    if texte_json.startswith("```json"):
-        texte_json = texte_json[7:-3]
-    elif texte_json.startswith("```"):
-        texte_json = texte_json[3:-3]
-        
-    return json.loads(texte_json)
+    try:
+        # On force l'IA à répondre en JSON pur et on limite les hallucinations
+        reponse = model.generate_content(
+            contenu_requete,
+            generation_config={"response_mime_type": "application/json", "temperature": 0.2}
+        )
+        return json.loads(reponse.text)
+    except Exception as e:
+        # S'il y a une erreur, on l'affiche proprement pour savoir d'où ça vient
+        texte_brut = reponse.text if 'reponse' in locals() else 'Aucune réponse de Google'
+        raise Exception(f"L'IA n'a pas pu formater la réponse correctement.\nErreur technique : {str(e)}\nRéponse reçue : {texte_brut}")
 
 # ==============================================================================
 # 4. Interface Graphique & Sidebar
 # ==============================================================================
 st.title("🎓 Prépa LAS 1 : Le Générateur Ultime")
 
-# --- BARRE LATÉRALE (Paramètres) ---
 with st.sidebar:
     st.header("⚙️ Paramètres de l'IA")
     api_key = st.text_input("Clé API Google Gemini :", type="password")
@@ -124,9 +98,8 @@ with st.sidebar:
     nombre_qcm = st.number_input("Nombre de questions :", min_value=1, max_value=20, value=5)
     
     st.divider()
-    mode_examen = st.toggle("🚨 Activer le Mode Examen", help="Masque les corrections immédiates et augmente la difficulté des pièges.")
+    mode_examen = st.toggle("🚨 Activer le Mode Examen", help="Masque les corrections immédiates.")
 
-# --- ZONE PRINCIPALE (Upload) ---
 st.subheader("1. Importation du document")
 col1, col2 = st.columns([2, 1])
 
@@ -139,7 +112,7 @@ if fichier_upload is not None:
     doc_temp.close()
     
     with col2:
-        st.write(" ") # Espace
+        st.write(" ") 
         st.write(" ")
         page_debut, page_fin = st.slider("Plage de pages :", 1, total_pages, (1, min(3, total_pages)))
     
@@ -149,18 +122,18 @@ if fichier_upload is not None:
         if not api_key:
             st.error("⚠️ N'oublie pas ta clé API dans le menu de gauche !")
         else:
-            with st.spinner(f"L'IA prépare tes {nombre_qcm} QCM..."):
+            with st.spinner(f"L'IA prépare tes {nombre_qcm} QCM... (Cela prend environ 10 à 20 secondes)"):
                 try:
                     images_cours = extraire_images_pdf(fichier_upload, page_debut, page_fin)
                     donnees_generees = generer_qcm_gemini(images_cours, matiere, difficulte, nombre_qcm, mode_examen)
                     st.session_state['data'] = donnees_generees
-                    st.session_state['examen_valide'] = False # Réinitialise l'état de l'examen
+                    st.session_state['examen_valide'] = False
                     st.success("✅ Sujet prêt !")
                 except Exception as e:
-                    st.error(f"Erreur : {e}")
+                    st.error(f"Oups, un problème est survenu : {e}")
 
 # ==============================================================================
-# 5. Affichage des Résultats (Système d'onglets)
+# 5. Affichage des Résultats
 # ==============================================================================
 if 'data' in st.session_state:
     st.divider()
@@ -168,18 +141,12 @@ if 'data' in st.session_state:
     
     tab1, tab2, tab3 = st.tabs(["📖 Fiche de Synthèse", "📝 QCM", "🗂️ Export Flashcards"])
     
-    # ONGLET 1 : La Synthèse (Fond Noir, Texte Blanc)
     with tab1:
         st.markdown(f"<div class='synth-box'><h3>📌 L'essentiel à retenir</h3><p>{data['fiche_synthese']}</p></div>", unsafe_allow_html=True)
 
-    # ONGLET 2 : Les QCM (Logique conditionnelle selon le mode)
     with tab2:
-        # ---------------------------------------------------------
-        # MODE EXAMEN (Correction à la fin)
-        # ---------------------------------------------------------
         if mode_examen:
-            st.warning("⚠️ MODE EXAMEN ACTIF : Les réponses sont masquées. Réponds à toutes les questions avant de valider.")
-            
+            st.warning("⚠️ MODE EXAMEN ACTIF : Les réponses sont masquées. Réponds à tout avant de valider.")
             reponses_utilisateur = {}
             for i, qcm in enumerate(data['qcm']):
                 st.markdown(f"**Question {i+1} : {qcm['question']}**")
@@ -209,9 +176,6 @@ if 'data' in st.session_state:
                 note = (score / len(data['qcm'])) * 20
                 st.metric(label="Note Finale", value=f"{note:.1f} / 20")
 
-        # ---------------------------------------------------------
-        # MODE ENTRAÎNEMENT CLASSIQUE (Correction immédiate)
-        # ---------------------------------------------------------
         else:
             for i, qcm in enumerate(data['qcm']):
                 with st.expander(f"Question {i+1} : {qcm['question']}", expanded=True):
@@ -229,7 +193,6 @@ if 'data' in st.session_state:
                         
                         st.info(f"**Explication du professeur :** {qcm['explication']}")
 
-    # ONGLET 3 : Export Anki
     with tab3:
         st.write("Télécharge tes questions pour les réviser plus tard sur Anki.")
         df_anki = pd.DataFrame({
