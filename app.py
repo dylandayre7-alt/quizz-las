@@ -7,7 +7,7 @@ import pandas as pd
 import io
 
 # ==============================================================================
-# 1. Configuration et Design de la page
+# 1. Configuration et Design
 # ==============================================================================
 st.set_page_config(page_title="Prépa LAS 1 - IA Premium", page_icon="🎓", layout="wide")
 
@@ -29,15 +29,27 @@ Tu es un Professeur d'Université intraitable, expert en rédaction de sujets de
 Matière : {matiere}
 Niveau de difficulté : {difficulte}/10
 Nombre de questions : {nombre_qcm}
-Mode Examen activé : {mode_examen}
 
 Directives :
 - Si Mode Examen = "OUI" : Pose UNIQUEMENT des questions "High Yield" (probables au concours). Utilise des tournures ambiguës, piège sur des détails infimes, ou des inversions de schémas.
 - Si Mode Examen = "NON" : Fais des questions d'entraînement classiques.
 
 Analyse les documents fournis.
-Rédige une "fiche_synthese" (3 à 5 points cruciaux).
-Génère {nombre_qcm} questions "qcm" à 5 options (A, B, C, D, E).
+TU DOIS ABSOLUMENT UTILISER CES CLÉS JSON (Ne change aucune lettre) :
+"fiche_synthese", "qcm", "question", "options", "reponses_correctes", "explication".
+
+Format imposé :
+{{
+  "fiche_synthese": "Résumé...",
+  "qcm": [
+    {{
+      "question": "Énoncé...",
+      "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
+      "reponses_correctes": ["A", "C"],
+      "explication": "..."
+    }}
+  ]
+}}
 """
 
 # ==============================================================================
@@ -69,16 +81,13 @@ def generer_qcm_gemini(images, matiere, difficulte, nombre_qcm, est_mode_examen)
     model = genai.GenerativeModel('gemini-2.5-flash')
     
     try:
-        # On force l'IA à répondre en JSON pur et on limite les hallucinations
         reponse = model.generate_content(
             contenu_requete,
             generation_config={"response_mime_type": "application/json", "temperature": 0.2}
         )
         return json.loads(reponse.text)
     except Exception as e:
-        # S'il y a une erreur, on l'affiche proprement pour savoir d'où ça vient
-        texte_brut = reponse.text if 'reponse' in locals() else 'Aucune réponse de Google'
-        raise Exception(f"L'IA n'a pas pu formater la réponse correctement.\nErreur technique : {str(e)}\nRéponse reçue : {texte_brut}")
+        raise Exception(f"L'IA n'a pas pu formater la réponse.\nErreur : {str(e)}")
 
 # ==============================================================================
 # 4. Interface Graphique & Sidebar
@@ -98,7 +107,7 @@ with st.sidebar:
     nombre_qcm = st.number_input("Nombre de questions :", min_value=1, max_value=20, value=5)
     
     st.divider()
-    mode_examen = st.toggle("🚨 Activer le Mode Examen", help="Masque les corrections immédiates.")
+    mode_examen = st.toggle("🚨 Activer le Mode Examen")
 
 st.subheader("1. Importation du document")
 col1, col2 = st.columns([2, 1])
@@ -120,9 +129,9 @@ if fichier_upload is not None:
     
     if st.button(texte_bouton, type="primary", use_container_width=True):
         if not api_key:
-            st.error("⚠️ N'oublie pas ta clé API dans le menu de gauche !")
+            st.error("⚠️ N'oublie pas ta clé API !")
         else:
-            with st.spinner(f"L'IA prépare tes {nombre_qcm} QCM... (Cela prend environ 10 à 20 secondes)"):
+            with st.spinner("L'IA prépare tes QCM... (Veuillez patienter quelques secondes)"):
                 try:
                     images_cours = extraire_images_pdf(fichier_upload, page_debut, page_fin)
                     donnees_generees = generer_qcm_gemini(images_cours, matiere, difficulte, nombre_qcm, mode_examen)
@@ -130,10 +139,10 @@ if fichier_upload is not None:
                     st.session_state['examen_valide'] = False
                     st.success("✅ Sujet prêt !")
                 except Exception as e:
-                    st.error(f"Oups, un problème est survenu : {e}")
+                    st.error(f"Erreur : {e}")
 
 # ==============================================================================
-# 5. Affichage des Résultats
+# 5. Affichage des Résultats (Sécurisé)
 # ==============================================================================
 if 'data' in st.session_state:
     st.divider()
@@ -142,15 +151,22 @@ if 'data' in st.session_state:
     tab1, tab2, tab3 = st.tabs(["📖 Fiche de Synthèse", "📝 QCM", "🗂️ Export Flashcards"])
     
     with tab1:
-        st.markdown(f"<div class='synth-box'><h3>📌 L'essentiel à retenir</h3><p>{data['fiche_synthese']}</p></div>", unsafe_allow_html=True)
+        synthese = data.get('fiche_synthese', 'Résumé non généré.')
+        st.markdown(f"<div class='synth-box'><h3>📌 L'essentiel à retenir</h3><p>{synthese}</p></div>", unsafe_allow_html=True)
 
     with tab2:
+        # Récupération sécurisée de la liste des QCM
+        liste_qcm = data.get('qcm', [])
+        
         if mode_examen:
-            st.warning("⚠️ MODE EXAMEN ACTIF : Les réponses sont masquées. Réponds à tout avant de valider.")
+            st.warning("⚠️ MODE EXAMEN ACTIF : Réponds à tout avant de valider.")
             reponses_utilisateur = {}
-            for i, qcm in enumerate(data['qcm']):
-                st.markdown(f"**Question {i+1} : {qcm['question']}**")
-                options_formattees = [f"{lettre}: {texte}" for lettre, texte in qcm['options'].items()]
+            
+            for i, qcm in enumerate(liste_qcm):
+                question = qcm.get('question', f'Question {i+1}')
+                options = qcm.get('options', {})
+                st.markdown(f"**Question {i+1} : {question}**")
+                options_formattees = [f"{lettre}: {texte}" for lettre, texte in options.items()]
                 reponses_utilisateur[i] = st.multiselect(f"Tes choix :", options_formattees, key=f"exam_{i}")
                 st.write("---")
             
@@ -158,52 +174,60 @@ if 'data' in st.session_state:
                 st.session_state['examen_valide'] = True
                 
             if st.session_state.get('examen_valide', False):
-                st.subheader("📊 Résultats de l'examen")
+                st.subheader("📊 Résultats")
                 score = 0
-                for i, qcm in enumerate(data['qcm']):
-                    bonnes = sorted(qcm['reponses_correctes'])
+                for i, qcm in enumerate(liste_qcm):
+                    # Extraction ultra-sécurisée de la bonne réponse
+                    bonnes_brut = qcm.get('reponses_correctes', qcm.get('reponse_correcte', []))
+                    if not isinstance(bonnes_brut, list): bonnes_brut = [bonnes_brut]
+                    bonnes = sorted([str(b).strip() for b in bonnes_brut])
+                    
                     choix = sorted([r.split(":")[0] for r in reponses_utilisateur[i]])
                     
-                    if choix == bonnes:
+                    if choix == bonnes and len(bonnes) > 0:
                         score += 1
                         st.success(f"Question {i+1} : JUSTE ✅")
                     else:
-                        st.error(f"Question {i+1} : FAUX ❌ (Il fallait répondre : {', '.join(bonnes)})")
+                        st.error(f"Question {i+1} : FAUX ❌ (Réponse : {', '.join(bonnes)})")
                     
-                    with st.expander("Voir l'explication du correcteur"):
-                        st.write(qcm['explication'])
+                    with st.expander("Voir l'explication"):
+                        st.write(qcm.get('explication', 'Pas d\'explication.'))
                 
-                note = (score / len(data['qcm'])) * 20
-                st.metric(label="Note Finale", value=f"{note:.1f} / 20")
+                if len(liste_qcm) > 0:
+                    note = (score / len(liste_qcm)) * 20
+                    st.metric(label="Note Finale", value=f"{note:.1f} / 20")
 
         else:
-            for i, qcm in enumerate(data['qcm']):
-                with st.expander(f"Question {i+1} : {qcm['question']}", expanded=True):
-                    options_formattees = [f"{lettre}: {texte}" for lettre, texte in qcm['options'].items()]
-                    reponse_utilisateur = st.multiselect(f"Sélectionne tes réponses :", options_formattees, key=f"entrainement_{i}")
+            for i, qcm in enumerate(liste_qcm):
+                question = qcm.get('question', f'Question {i+1}')
+                options = qcm.get('options', {})
+                
+                with st.expander(f"Question {i+1} : {question}", expanded=True):
+                    options_formattees = [f"{lettre}: {texte}" for lettre, texte in options.items()]
+                    reponse_utilisateur = st.multiselect(f"Tes réponses :", options_formattees, key=f"entrainement_{i}")
                     
                     if st.button(f"Vérifier", key=f"btn_{i}"):
-                        lettres_choisies = [rep.split(":")[0] for rep in reponse_utilisateur]
-                        lettres_correctes = qcm['reponses_correctes']
+                        bonnes_brut = qcm.get('reponses_correctes', qcm.get('reponse_correcte', []))
+                        if not isinstance(bonnes_brut, list): bonnes_brut = [bonnes_brut]
+                        bonnes = sorted([str(b).strip() for b in bonnes_brut])
                         
-                        if sorted(lettres_choisies) == sorted(lettres_correctes):
-                            st.success(f"✅ Vrai ! Réponses : {', '.join(lettres_correctes)}")
+                        choix = sorted([r.split(":")[0] for r in reponse_utilisateur])
+                        
+                        if choix == bonnes and len(bonnes) > 0:
+                            st.success(f"✅ Vrai ! Réponses : {', '.join(bonnes)}")
                         else:
-                            st.error(f"❌ Faux. Les bonnes réponses étaient : {', '.join(lettres_correctes)}")
+                            st.error(f"❌ Faux. Les bonnes réponses étaient : {', '.join(bonnes)}")
                         
-                        st.info(f"**Explication du professeur :** {qcm['explication']}")
+                        st.info(f"**Explication :** {qcm.get('explication', 'Pas d\'explication.')}")
 
     with tab3:
-        st.write("Télécharge tes questions pour les réviser plus tard sur Anki.")
-        df_anki = pd.DataFrame({
-            "Recto (Question)": [q["question"] + " " + str(q["options"]) for q in data['qcm']],
-            "Verso (Réponse + Explication)": [f"Réponse(s): {q['reponses_correctes']} - Explication: {q['explication']}" for q in data['qcm']]
-        })
-        
-        csv_anki = df_anki.to_csv(index=False, sep=";").encode('utf-8')
-        st.download_button(
-            label="📥 Télécharger le CSV",
-            data=csv_anki,
-            file_name="flashcards_concours.csv",
-            mime="text/csv"
-        )
+        st.write("Télécharge tes questions pour Anki.")
+        try:
+            df_anki = pd.DataFrame({
+                "Recto": [q.get("question", "") + " " + str(q.get("options", {})) for q in liste_qcm],
+                "Verso": [f"Réponse: {q.get('reponses_correctes', '')} - {q.get('explication', '')}" for q in liste_qcm]
+            })
+            csv_anki = df_anki.to_csv(index=False, sep=";").encode('utf-8')
+            st.download_button("📥 Télécharger le CSV", data=csv_anki, file_name="flashcards.csv", mime="text/csv")
+        except Exception:
+            st.error("Génération des flashcards impossible pour cette série.")
