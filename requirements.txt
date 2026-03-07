@@ -1,0 +1,5 @@
+streamlit
+PyMuPDF
+Pillow
+google-generativeai
+pandas
