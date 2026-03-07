@@ -73,7 +73,7 @@ def generer_qcm_gemini(images, matiere, difficulte, nombre_qcm):
     prompt_final = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm)
     contenu_requete = [prompt_final] + images
     
-    model = genai.GenerativeModel('gemini-1.5-pro-latest')
+    model = genai.GenerativeModel('gemini-2.5-pro-latest')
     reponse = model.generate_content(contenu_requete)
     
     texte_json = reponse.text.strip()
