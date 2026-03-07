@@ -66,7 +66,7 @@ def generer_qcm_gemini(images, matiere, difficulte, nombre_qcm, est_mode_examen)
     )
     
     contenu_requete = [prompt_final] + images
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash')
     
     try:
         # On force l'IA à répondre en JSON pur et on limite les hallucinations
