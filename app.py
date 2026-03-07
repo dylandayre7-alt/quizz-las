@@ -65,7 +65,7 @@ def generer_qcm_gemini(images, notes_contexte):
     # On envoie le texte + toutes les images en une seule requête
     contenu_requete = [prompt_final] + images
     
-    # Utilisation de Gemini 1.5 Flash (Rapide, excellent en vision et gratuit)
+    # Utilisation de Gemini 2.5 Flash (Rapide, excellent en vision et gratuit)
     model = genai.GenerativeModel('gemini-1.5-flash')
     reponse = model.generate_content(contenu_requete)
     
