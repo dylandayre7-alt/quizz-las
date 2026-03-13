@@ -3,3 +3,4 @@ PyMuPDF
 Pillow
 google-generativeai
 pandas
+python-docx
