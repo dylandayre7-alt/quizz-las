@@ -5,11 +5,12 @@ import google.generativeai as genai
 import json
 import pandas as pd
 import io
+import docx  # NOUVEAU : Pour lire les fichiers Word
 
 # ==============================================================================
 # 1. Configuration de la page et Design
 # ==============================================================================
-st.set_page_config(page_title="Prépa LAS 1 - IA Multimodale", page_icon="🎓", layout="wide")
+st.set_page_config(page_title="Prépa LAS 1 - IA Premium", page_icon="🎓", layout="wide")
 
 st.markdown("""
 <style>
@@ -17,13 +18,8 @@ st.markdown("""
     .stTabs [data-baseweb="tab"] { height: 50px; background-color: #f0f2f6; border-radius: 10px 10px 0 0; padding: 10px 20px; }
     .stTabs [aria-selected="true"] { background-color: #ff4b4b; color: white; font-weight: bold; }
     .synth-box { 
-        padding: 25px; 
-        background-color: #000000; 
-        color: #ffffff; 
-        border-left: 8px solid #ff4b4b; 
-        border-radius: 10px; 
-        margin-bottom: 25px; 
-        line-height: 1.6;
+        padding: 25px; background-color: #000000; color: #ffffff; 
+        border-left: 8px solid #ff4b4b; border-radius: 10px; margin-bottom: 25px; line-height: 1.6;
     }
     .synth-box h3, .synth-box h4, .synth-box p, .synth-box li { color: #ffffff !important; }
     .correct-box { background-color: #d4edda; padding: 15px; border-radius: 10px; margin-bottom: 10px; border: 1px solid #c3e6cb; color: #155724; }
@@ -32,40 +28,44 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Le Prompt Maître (JSON, Index Image, Cases)
+# 2. Le Prompt Maître (Avec intégration des notes de l'étudiant)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur d'Université expert en LAS 1. 
 
 OBJECTIF : 
-1. Rédiger une fiche de synthèse.
-2. Générer un mélange de QCM conceptuels et VISUELS (sur les schémas).
+1. Rédiger une fiche de synthèse du cours.
+2. Générer des QCM Conceptuels (cours pur, définitions) ou Calcul/Problème.
 3. Fournir une correction détaillée avec la source.
 
 Matière : {matiere} | Difficulté : {difficulte}/10 | Nombre : {nombre_qcm}
 
-RÈGLE IMPORTANTE POUR LES IMAGES :
-Les images fournies sont indexées de 0 à N. Si ta question porte sur un schéma précis, indique son index dans "index_image". Si la question est purement textuelle, mets -1.
+DIRECTIVE SPÉCIALE - NOTES DE L'ÉTUDIANT :
+Voici les notes de synthèse personnelles de l'étudiant : 
+"{notes_etudiant}"
+Si ces notes ne sont pas vides, tu DOIS ABSOLUMENT te baser dessus en priorité pour orienter tes questions. L'objectif est de vérifier s'il maîtrise les concepts qu'il a lui-même synthétisés, tout en complétant avec le reste du cours.
+
+RÈGLE POUR LES CALCULS :
+Si c'est un problème, détaille IMPÉRATIVEMENT la formule et le calcul étape par étape dans l'explication.
 
 TU DOIS OBLIGATOIREMENT RÉPONDRE EN JSON STRICT :
 {{
   "fiche_synthese": "Résumé structuré.",
   "qcm": [
     {{
-      "type_question": "Visuelle ou Conceptuelle",
-      "index_image": 0,
+      "type_question": "Conceptuelle" ou "Calcul",
       "question": "Énoncé",
       "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
       "reponses_correctes": ["A", "C"],
-      "explication": "Démonstration.",
-      "source_cours": "Source exacte."
+      "explication": "Démonstration logique ou calcul étape par étape.",
+      "source_cours": "Source exacte (Document ou Fiche de l'étudiant)."
     }}
   ]
 }}
 """
 
 # ==============================================================================
-# 3. Moteur de Traitement
+# 3. Fonctions de Traitement (PDF et Word)
 # ==============================================================================
 def extraire_images_pdf(buffer_fichier, page_debut, page_fin):
     buffer_fichier.seek(0)
@@ -73,23 +73,32 @@ def extraire_images_pdf(buffer_fichier, page_debut, page_fin):
     images = []
     for i in range(page_debut - 1, min(page_fin, len(doc))):
         page = doc[i]
-        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         images.append(img)
     doc.close()
     return images
 
-def generer_donnees(images, matiere, difficulte, nombre_qcm):
-    prompt_final = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm)
+def lire_word(buffer_fichier):
+    """Extrait le texte brut d'un document Word (.docx)"""
+    doc = docx.Document(buffer_fichier)
+    texte_complet = "\n".join([para.text for para in doc.paragraphs])
+    return texte_complet
+
+def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm):
+    notes = texte_word if texte_word else "Aucune note personnelle fournie."
+    prompt_final = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, notes_etudiant=notes)
+    
     model = genai.GenerativeModel('gemini-2.5-flash')
+    # On envoie le texte (prompt avec notes) + les images du cours
     reponse = model.generate_content(
-        [prompt_final] + images, 
-        generation_config={"response_mime_type": "application/json", "temperature": 0.3}
+        [prompt_final] + images_pdf, 
+        generation_config={"response_mime_type": "application/json", "temperature": 0.2}
     )
     return json.loads(reponse.text)
 
 # ==============================================================================
-# 4. Interface Latérale (Configuration)
+# 4. Interface Latérale
 # ==============================================================================
 with st.sidebar:
     st.header("⚙️ Configuration API")
@@ -99,29 +108,32 @@ with st.sidebar:
     
     st.divider()
     st.header("📚 Réglages")
-    matiere = st.selectbox("Matière :", ["Anatomie", "Biologie / Biochimie", "Histologie", "Droit Médical"])
+    matiere = st.selectbox("Matière :", ["Biologie / Biochimie", "Épidémiologie / Biostats", "Anatomie (Théorie)", "Pharmacologie", "Droit Médical"])
     difficulte = st.slider("Difficulté (1-10) :", 1, 10, 8)
     nombre_qcm = st.number_input("Nombre de questions :", 1, 20, 5)
     
     st.divider()
-    # LE RETOUR DU TOGGLE MODE EXAMEN
-    mode_examen = st.toggle("🚨 Activer le Mode Examen", help="Masque les corrections immédiates pour valider à la fin.")
+    mode_examen = st.toggle("🚨 Activer le Mode Examen")
 
 # ==============================================================================
-# 5. Espace Principal (Upload)
+# 5. Espace Principal (Double Upload)
 # ==============================================================================
 st.title("🎓 Simulateur de Concours LAS 1")
 
-fichier_upload = st.file_uploader("Charge ton cours (PDF)", type=['pdf'])
+col_upload1, col_upload2 = st.columns(2)
+with col_upload1:
+    fichier_pdf = st.file_uploader("1. Document de référence (PDF)", type=['pdf'])
+with col_upload2:
+    fichier_word = st.file_uploader("2. Tes fiches (Word .docx) - Optionnel", type=['docx'])
 
-if fichier_upload:
-    doc_temp = fitz.open(stream=fichier_upload.read(), filetype="pdf")
+if fichier_pdf:
+    doc_temp = fitz.open(stream=fichier_pdf.read(), filetype="pdf")
     total_pages = len(doc_temp)
     doc_temp.close()
     
     col1, col2 = st.columns([1, 2])
     with col1:
-        page_deb, page_fin = st.slider("Pages à inclure :", 1, total_pages, (1, min(4, total_pages)))
+        page_deb, page_fin = st.slider("Pages du PDF à inclure :", 1, total_pages, (1, min(4, total_pages)))
     
     with col2:
         st.write("") 
@@ -130,24 +142,23 @@ if fichier_upload:
             if not api_key: 
                 st.error("⚠️ Clé API manquante.")
             else:
-                with st.spinner("Analyse visuelle et textuelle en cours..."):
+                with st.spinner("Analyse du cours et de tes fiches en cours..."):
                     try:
-                        imgs = extraire_images_pdf(fichier_upload, page_deb, page_fin)
-                        # On sauvegarde les images dans la session pour pouvoir les réafficher dans les QCM
-                        st.session_state['images_cours'] = imgs 
-                        st.session_state['data'] = generer_donnees(imgs, matiere, difficulte, nombre_qcm)
+                        imgs_pdf = extraire_images_pdf(fichier_pdf, page_deb, page_fin)
+                        texte_fiches = lire_word(fichier_word) if fichier_word else ""
+                        
+                        st.session_state['data'] = generer_donnees(imgs_pdf, texte_fiches, matiere, difficulte, nombre_qcm)
                         st.session_state['examen_soumis'] = False
                     except Exception as e: 
                         st.error(f"Erreur : {e}")
 
 # ==============================================================================
-# 6. Zone d'Examen et Cases à cocher
+# 6. Zone d'Examen (Affichage et Correction)
 # ==============================================================================
 if 'data' in st.session_state:
     st.divider()
     data = st.session_state['data']
     liste_qcm = data.get('qcm', [])
-    images_sauvegardees = st.session_state.get('images_cours', [])
     
     tab1, tab2, tab3 = st.tabs(["📖 Fiche de Révision", "✍️ QCM", "🗂️ Exporter"])
 
@@ -156,23 +167,13 @@ if 'data' in st.session_state:
 
     with tab2:
         if not st.session_state.get('examen_soumis', False):
-            
             for i, q in enumerate(liste_qcm):
-                # 1. AFFICHAGE DE LA QUESTION
-                st.markdown(f"### Question {i+1} : {q.get('question', '')}")
-                
-                # 2. AFFICHAGE DE L'IMAGE SI VISUELLE
-                index_img = q.get('index_image', -1)
-                if index_img >= 0 and index_img < len(images_sauvegardees):
-                    st.image(images_sauvegardees[index_img], caption=f"Document de référence (Page {page_deb + index_img})", use_container_width=True)
-                elif q.get('type_question') == 'Visuelle':
-                    st.info("ℹ️ Cette question se base sur un schéma du cours.")
+                st.markdown(f"### Question {i+1} *({q.get('type_question', 'Conceptuelle')})* :")
+                st.write(q.get('question', ''))
 
-                # 3. CASES À COCHER (Sur 2 colonnes comme sur ton image)
                 st.write("**Cochez la ou les bonnes propositions :**")
                 col_gauche, col_droite = st.columns(2)
                 
-                # Initialisation de la liste des choix de l'utilisateur
                 if f"choix_{i}" not in st.session_state:
                     st.session_state[f"choix_{i}"] = []
                 
@@ -186,39 +187,34 @@ if 'data' in st.session_state:
                 
                 st.session_state[f"choix_{i}"] = reponses_cochees
 
-                # 4. LOGIQUE DES BOUTONS (Entraînement vs Examen)
                 if not mode_examen:
                     if st.button(f"Vérifier la question {i+1}", key=f"btn_verif_{i}"):
                         bonnes = sorted([str(b).strip() for b in q.get('reponses_correctes', [])])
                         mes_choix = sorted(reponses_cochees)
                         
                         if mes_choix == bonnes and len(bonnes) > 0:
-                            st.success(f"✅ Vrai ! Les bonnes réponses étaient : {', '.join(bonnes)}")
+                            st.success(f"✅ Vrai ! Les bonnes réponses : {', '.join(bonnes)}")
                         else:
-                            st.error(f"❌ Faux ! Les bonnes réponses étaient : {', '.join(bonnes)}")
+                            st.error(f"❌ Faux ! Les bonnes réponses : {', '.join(bonnes)}")
                         
                         st.info(f"**Explication :** {q.get('explication', '')}\n\n**Source :** {q.get('source_cours', '')}")
                 
                 st.divider()
             
-            # BOUTON GLOBAL SI MODE EXAMEN
             if mode_examen:
                 if st.button("🏁 Valider ma copie et voir mon score", type="primary", use_container_width=True):
                     st.session_state['examen_soumis'] = True
                     st.rerun()
         
-        # AFFICHAGE DU RÉSULTAT GLOBAL (Mode Examen uniquement)
         else:
             st.subheader("📊 Bilan de l'examen")
             score = 0
-            
             for i, q in enumerate(liste_qcm):
                 bonnes = sorted([str(b).strip() for b in q.get('reponses_correctes', [])])
                 mes_choix = sorted(st.session_state.get(f"choix_{i}", []))
                 
-                est_juste = (bonnes == mes_choix)
-                if est_juste and len(bonnes) > 0:
-                    score += 1
+                est_juste = (mes_choix == bonnes)
+                if est_juste and len(bonnes) > 0: score += 1
                 
                 div_class = "correct-box" if est_juste else "error-box"
                 statut = "✅ JUSTE" if est_juste else "❌ FAUX"
