@@ -27,24 +27,25 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Le Prompt Maître (Style ANNALES LAS 1 + Mix des sources)
+# 2. Le Prompt Maître (Adaptation dynamique du style de question)
 # ==============================================================================
 SYSTEM_PROMPT = """
-Tu es un Professeur d'Université intraitable, expert en rédaction de sujets de concours LAS 1 / PASS. 
+Tu es un Professeur d'Université intraitable, expert en rédaction de sujets LAS 1 / PASS. 
 
 OBJECTIF : 
 1. Rédiger une fiche de synthèse.
-2. Générer des QCM de niveau CONCOURS (Très difficile, discriminatoire).
+2. Générer des QCM.
 3. Fournir une correction ultra-détaillée.
 
-Matière : {matiere} | Difficulté : {difficulte}/10 (10 = niveau annales, pièges vicieux) | Nombre : {nombre_qcm}
+Matière : {matiere} | Difficulté : {difficulte}/10 | Nombre : {nombre_qcm}
 
-DIRECTIVE SPÉCIALE - STYLE DES ANNALES :
+STYLE DES QUESTIONS À UTILISER :
+{style_question}
+
+RÈGLES COMMUNES :
 - Les QCM doivent comporter 5 propositions (A, B, C, D, E).
 - Il peut y avoir UNE ou PLUSIEURS réponses correctes.
-- La proposition E doit souvent être "Aucune des propositions ci-dessus n'est exacte".
-- Les propositions doivent être des phrases complexes. Piège l'étudiant sur des détails : inclusions, exclusions, chronologie, exceptions, mots-clés inversés.
-- Dans l'explication, tu DOIS justifier CHAQUE lettre une par une (ex: "A: VRAI car..., B: FAUX car...").
+- Dans l'explication, tu DOIS justifier chaque réponse.
 
 MIXAGE DES SOURCES :
 Tu disposes du cours officiel (PDF) et des fiches de l'étudiant : "{notes_etudiant}". Fais un mix équilibré entre les deux.
@@ -55,8 +56,8 @@ TU DOIS OBLIGATOIREMENT RÉPONDRE EN JSON STRICT :
   "qcm": [
     {{
       "type_question": "Conceptuelle" ou "Calcul",
-      "question": "Parmi les propositions suivantes, laquelle (lesquelles) est (sont) exacte(s) ?",
-      "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "Aucune des propositions ci-dessus n'est exacte"}},
+      "question": "Énoncé de la question adapté au style demandé.",
+      "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
       "reponses_correctes": ["A", "C"],
       "explication": "Détail : A (VRAI) : justification. B (FAUX) : justification...",
       "source_cours": "Préciser la source."
@@ -84,9 +85,16 @@ def lire_word(buffer_fichier):
     doc = docx.Document(buffer_fichier)
     return "\n".join([para.text for para in doc.paragraphs])
 
-def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm):
+def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen):
     notes = texte_word if texte_word else "Aucune note personnelle fournie."
-    prompt_final = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, notes_etudiant=notes)
+    
+    # L'IA adapte son comportement selon que le bouton Examen est coché ou non
+    if est_mode_examen:
+        style = "Style ANNALES DE CONCOURS : Utilise obligatoirement la formulation 'Parmi les propositions suivantes, laquelle (lesquelles) est (sont) exacte(s) ?'. Les propositions doivent être longues, complexes, et la proposition E doit souvent être 'Aucune des propositions ci-dessus n'est exacte'. Piège l'étudiant sur des détails."
+    else:
+        style = "Style ENTRAÎNEMENT CLASSIQUE : Pose des questions d'apprentissage directes, claires et précises (ex: 'Quel est le rôle de...', 'Où se situe...', 'Calculez...'). Évite absolument la formulation 'Parmi les propositions suivantes...'. L'objectif est d'assimiler le cours simplement."
+
+    prompt_final = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, notes_etudiant=notes, style_question=style)
     
     model = genai.GenerativeModel('gemini-2.5-flash')
     reponse = model.generate_content(
@@ -96,7 +104,7 @@ def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm):
     return json.loads(reponse.text)
 
 # ==============================================================================
-# 4. Interface Latérale (Avec retour du Toggle Examen)
+# 4. Interface Latérale
 # ==============================================================================
 with st.sidebar:
     st.header("⚙️ Configuration API")
@@ -107,11 +115,11 @@ with st.sidebar:
     st.divider()
     st.header("📚 Réglages")
     matiere = st.selectbox("Matière :", ["Biologie / Biochimie", "Épidémiologie / Biostats", "Anatomie (Théorie)", "Pharmacologie", "Droit Médical"])
-    difficulte = st.slider("Difficulté (1-10) :", 1, 10, 9)
+    difficulte = st.slider("Difficulté (1-10) :", 1, 10, 8)
     nombre_qcm = st.number_input("Nombre de questions :", 1, 30, 5)
     
     st.divider()
-    mode_examen = st.toggle("🚨 Activer le Mode Examen", help="Désactive la correction immédiate.")
+    mode_examen = st.toggle("🚨 Activer le Mode Examen", help="Active le style de questions type 'Annales' et masque les corrections intermédiaires.")
 
 # ==============================================================================
 # 5. Espace Principal (Upload)
@@ -136,22 +144,25 @@ if fichier_pdf:
     with col2:
         st.write("") 
         st.write("")
-        if st.button("🧠 Générer les Annales", type="primary", use_container_width=True):
+        texte_bouton = "🧠 Générer les Annales (Mode Examen)" if mode_examen else "🧠 Générer l'Entraînement"
+        
+        if st.button(texte_bouton, type="primary", use_container_width=True):
             if not api_key: 
                 st.error("⚠️ Clé API manquante.")
             else:
-                with st.spinner("L'IA prépare tes pièges de concours..."):
+                with st.spinner("L'IA prépare tes questions..."):
                     try:
                         imgs_pdf = extraire_images_pdf(fichier_pdf, page_deb, page_fin)
                         texte_fiches = lire_word(fichier_word) if fichier_word else ""
                         
-                        st.session_state['data'] = generer_donnees(imgs_pdf, texte_fiches, matiere, difficulte, nombre_qcm)
+                        # On envoie l'état du bouton "mode_examen" à la fonction
+                        st.session_state['data'] = generer_donnees(imgs_pdf, texte_fiches, matiere, difficulte, nombre_qcm, mode_examen)
                         st.session_state['examen_soumis'] = False
                     except Exception as e: 
                         st.error(f"Erreur : {e}")
 
 # ==============================================================================
-# 6. Zone de QCM (Logique Entraînement vs Examen avec bouton final)
+# 6. Zone de QCM
 # ==============================================================================
 if 'data' in st.session_state:
     st.divider()
@@ -166,9 +177,9 @@ if 'data' in st.session_state:
     with tab2:
         if not st.session_state.get('examen_soumis', False):
             if mode_examen:
-                st.warning("🚨 **MODE EXAMEN ACTIF** : Coche tes réponses pour chaque question, puis valide ta copie tout en bas de la page.")
+                st.warning("🚨 **MODE EXAMEN ACTIF** : Questions type concours. Coche tes réponses, puis valide ta copie tout en bas.")
             else:
-                st.info("💡 **MODE ENTRAÎNEMENT ACTIF** : Tu peux vérifier la correction sous chaque question, OU tout corriger d'un coup à la fin.")
+                st.info("💡 **MODE ENTRAÎNEMENT ACTIF** : Questions d'apprentissage. Tu peux vérifier la correction sous chaque question, ou tout corriger d'un coup à la fin.")
                 
             for i, q in enumerate(liste_qcm):
                 st.markdown(f"### Question {i+1} :")
@@ -189,7 +200,6 @@ if 'data' in st.session_state:
                 
                 st.session_state[f"choix_{i}"] = reponses_cochees
 
-                # BOUTON VÉRIFIER INDIVIDUEL (Seulement si Mode Examen est désactivé)
                 if not mode_examen:
                     if st.button(f"Vérifier la question {i+1}", key=f"btn_verif_{i}"):
                         bonnes = sorted([str(b).strip() for b in q.get('reponses_correctes', [])])
@@ -204,15 +214,13 @@ if 'data' in st.session_state:
                 
                 st.divider()
             
-            # LE BOUTON FINAL GLOBAL (Toujours présent, adapte son texte selon le mode)
             texte_bouton_final = "🏁 Valider ma copie et voir mon score" if mode_examen else "✅ Tout corriger d'un coup et voir mon score"
             if st.button(texte_bouton_final, type="primary", use_container_width=True):
                 st.session_state['examen_soumis'] = True
                 st.rerun()
         
         else:
-            # AFFICHAGE DES RÉSULTATS (Identique pour les deux modes)
-            st.subheader("📊 Bilan de l'examen")
+            st.subheader("📊 Bilan")
             score = 0
             
             for i, q in enumerate(liste_qcm):
@@ -236,7 +244,7 @@ if 'data' in st.session_state:
                 c1.write(f"**Tes choix :** {', '.join(mes_choix) if mes_choix else 'Aucune'}")
                 c2.write(f"**Corrigé :** {', '.join(bonnes)}")
                 
-                with st.expander("🔍 Voir la correction détaillée de chaque proposition"):
+                with st.expander("🔍 Voir la correction détaillée"):
                     st.write(q.get('explication', ''))
                     st.success(f"📍 **Source :** {q.get('source_cours', '')}")
                 st.write("<br>", unsafe_allow_html=True)
