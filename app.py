@@ -47,7 +47,7 @@ def ajouter_erreur_session(matiere, question, choix_user, bonnes_rep, explicatio
     })
 
 # ==============================================================================
-# 3. Moteur IA (Consignes recalibrées pour QCM et Synthèse)
+# 3. Moteur IA (Consignes recalibrées + Sécurité Guillemets)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur d'Université expert en LAS 1. 
@@ -57,8 +57,10 @@ STYLE : {style_question}
 
 MIXAGE : Base-toi 50% sur le texte du COURS OFFICIEL fourni et 50% sur les notes de l'étudiant : "{notes_etudiant}"
 
-⚠️ RÈGLE SUR LA SYNTHÈSE : Tu dois produire une fiche de synthèse EXHAUSTIVE, LONGUE et TRÈS BIEN STRUCTURÉE. Utilise le Markdown (titres ###, puces -, mots-clés en **gras**). Ne bâcle surtout pas cette partie, elle est vitale pour l'étudiant.
-⚠️ RÈGLE SUR LES QCM : Tu DOIS IMPÉRATIVEMENT générer EXACTEMENT {nombre_qcm} questions. Ce sont de VRAIS QCM : il y a très souvent PLUSIEURS propositions exactes (ex: A, C et D). Ne fais surtout pas que des questions à choix unique (QCU).
+⚠️ RÈGLE DE SYNTAXE ABSOLUE (POUR NE PAS CRASHER) : Tu ne dois JAMAIS utiliser de guillemets doubles (") à l'intérieur de tes phrases de texte. Utilise EXCLUSIVEMENT des guillemets simples (') si tu dois citer quelque chose. Les guillemets doubles sont strictement réservés à la structure JSON.
+
+⚠️ RÈGLE SUR LA SYNTHÈSE : Produis une fiche de synthèse EXHAUSTIVE, LONGUE et TRÈS BIEN STRUCTURÉE. Utilise le Markdown (titres ###, puces -, mots-clés en **gras**). Ne bâcle pas cette partie.
+⚠️ RÈGLE SUR LES QCM : Tu DOIS IMPÉRATIVEMENT générer EXACTEMENT {nombre_qcm} questions. Ce sont de VRAIS QCM : il y a très souvent PLUSIEURS propositions exactes (ex: A, C et D).
 
 FORMAT JSON STRICT :
 {{
@@ -102,7 +104,19 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
         [prompt_final, contenu_requete], 
         generation_config={"response_mime_type": "application/json", "temperature": 0.2}
     )
-    return json.loads(reponse.text)
+    
+    # Nettoyage de sécurité en cas de balises markdown parasites
+    texte_brut = reponse.text.strip()
+    if texte_brut.startswith("```json"):
+        texte_brut = texte_brut[7:]
+    if texte_brut.startswith("```"):
+        texte_brut = texte_brut[3:]
+    if texte_brut.endswith("```"):
+        texte_brut = texte_brut[:-3]
+        
+    texte_brut = texte_brut.strip()
+    
+    return json.loads(texte_brut)
 
 # ==============================================================================
 # 4. Interface Sidebar
@@ -143,7 +157,10 @@ if f_pdf:
                     
                     st.session_state['data'] = generer_donnees(texte_cours, t_word, matiere, difficulte, nombre_qcm, mode_examen)
                     st.session_state['examen_soumis'] = False
-                except Exception as e: st.error(f"Erreur technique : {e}")
+                except json.JSONDecodeError as e:
+                    st.error("⚠️ L'IA a fait une erreur de mise en forme (ponctuation incorrecte). Clique à nouveau sur 'Lancer la génération' pour relancer le calcul !")
+                except Exception as e: 
+                    st.error(f"Erreur technique : {e}")
 
 # ==============================================================================
 # 6. Affichage Sécurisé
