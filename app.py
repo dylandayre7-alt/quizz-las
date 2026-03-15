@@ -9,7 +9,7 @@ import os
 from datetime import datetime
 
 # ==============================================================================
-# 1. Configuration de la page et Design
+# 1. Configuration et Design
 # ==============================================================================
 st.set_page_config(page_title="Prépa LAS 1 - IA Premium", page_icon="🎓", layout="wide")
 
@@ -18,111 +18,73 @@ st.markdown("""
     .stTabs [data-baseweb="tab-list"] { gap: 20px; }
     .stTabs [data-baseweb="tab"] { height: 50px; background-color: #f0f2f6; border-radius: 10px 10px 0 0; padding: 10px 20px; }
     .stTabs [aria-selected="true"] { background-color: #ff4b4b; color: white; font-weight: bold; }
-    .synth-box { 
-        padding: 25px; background-color: #000000; color: #ffffff; 
-        border-left: 8px solid #ff4b4b; border-radius: 10px; margin-bottom: 25px; line-height: 1.6;
-    }
+    .synth-box { padding: 25px; background-color: #000000; color: #ffffff; border-left: 8px solid #ff4b4b; border-radius: 10px; margin-bottom: 25px; }
     .synth-box h3, .synth-box h4, .synth-box p, .synth-box li { color: #ffffff !important; }
-    .correct-box { background-color: #d4edda; padding: 15px; border-radius: 10px; margin-bottom: 10px; border: 1px solid #c3e6cb; color: #155724; }
-    .error-box { background-color: #f8d7da; padding: 15px; border-radius: 10px; margin-bottom: 10px; border: 1px solid #f5c6cb; color: #721c24; }
-    .erreur-log { border-left: 4px solid #ff4b4b; padding-left: 15px; margin-bottom: 15px; background-color: #fffaf0; padding: 15px; border-radius: 5px; }
+    .correct-box { background-color: #d4edda; padding: 15px; border-radius: 10px; margin-bottom: 10px; color: #155724; }
+    .error-box { background-color: #f8d7da; padding: 15px; border-radius: 10px; margin-bottom: 10px; color: #721c24; }
+    .erreur-log { border-left: 4px solid #ff4b4b; padding: 15px; margin-bottom: 15px; background-color: #f9f9f9; border-radius: 5px; border: 1px solid #eee; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Gestion du Cahier d'Erreurs (Mémoire)
+# 2. Gestion de la Mémoire Session
 # ==============================================================================
-FICHIER_ERREURS = "cahier_erreurs.json"
+if 'cahier_memoire' not in st.session_state:
+    st.session_state['cahier_memoire'] = {}
 
-def charger_erreurs():
-    """Charge l'historique des erreurs depuis le fichier de sauvegarde."""
-    if os.path.exists(FICHIER_ERREURS):
-        try:
-            with open(FICHIER_ERREURS, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            return {}
-    return {}
-
-def sauvegarder_erreur(matiere, question, choix_user, bonnes_rep, explication):
-    """Enregistre une nouvelle erreur sans faire de doublons."""
-    erreurs = charger_erreurs()
+def ajouter_erreur_session(matiere, question, choix_user, bonnes_rep, explication):
+    if matiere not in st.session_state['cahier_memoire']:
+        st.session_state['cahier_memoire'][matiere] = []
     
-    if matiere not in erreurs:
-        erreurs[matiere] = []
-        
-    # Vérifier si l'erreur n'a pas déjà été enregistrée (pour éviter les doublons au rafraîchissement)
-    for err in erreurs[matiere]:
-        if err['question'] == question:
-            return
+    for err in st.session_state['cahier_memoire'][matiere]:
+        if err['question'] == question: return
 
-    nouvelle_erreur = {
+    st.session_state['cahier_memoire'][matiere].append({
         "date": datetime.now().strftime("%d/%m/%Y"),
         "question": question,
         "choix_user": choix_user,
         "bonnes_rep": bonnes_rep,
         "explication": explication
-    }
-    
-    erreurs[matiere].append(nouvelle_erreur)
-    
-    with open(FICHIER_ERREURS, "w", encoding="utf-8") as f:
-        json.dump(erreurs, f, indent=4, ensure_ascii=False)
-
-def effacer_cahier():
-    if os.path.exists(FICHIER_ERREURS):
-        os.remove(FICHIER_ERREURS)
+    })
 
 # ==============================================================================
-# 3. Le Prompt Maître (Style ANNALES LAS 1)
+# 3. Moteur IA Multi-Modal (Vision optimisée)
 # ==============================================================================
 SYSTEM_PROMPT = """
-Tu es un Professeur d'Université intraitable, expert en rédaction de sujets LAS 1 / PASS. 
-
-OBJECTIF : 
-1. Rédiger une fiche de synthèse.
-2. Générer des QCM.
-3. Fournir une correction ultra-détaillée.
-
+Tu es un Professeur d'Université expert en LAS 1. 
 Matière : {matiere} | Difficulté : {difficulte}/10 | Nombre : {nombre_qcm}
 
-STYLE DES QUESTIONS À UTILISER :
-{style_question}
+STYLE : {style_question}
 
-RÈGLES COMMUNES :
-- Les QCM doivent comporter 5 propositions (A, B, C, D, E).
-- Il peut y avoir UNE ou PLUSIEURS réponses correctes.
-- Dans l'explication, tu DOIS justifier chaque réponse.
+MIXAGE : Analyse attentivement les IMAGES fournies (qui contiennent des schémas, tableaux et textes). Base-toi 50% sur ces images et 50% sur les notes de l'étudiant : "{notes_etudiant}"
 
-MIXAGE DES SOURCES :
-Tu disposes du cours officiel (PDF) et des fiches de l'étudiant : "{notes_etudiant}". Fais un mix équilibré.
+⚠️ RÈGLE ABSOLUE : Tu DOIS IMPÉRATIVEMENT générer EXACTEMENT {nombre_qcm} questions dans la liste "qcm". Même si le diaporama est très long, sélectionne les informations les plus cruciales (High Yield) pour créer tes questions.
 
-TU DOIS OBLIGATOIREMENT RÉPONDRE EN JSON STRICT :
+FORMAT JSON STRICT :
 {{
-  "fiche_synthese": "Résumé structuré.",
+  "fiche_synthese": "Résumé...",
   "qcm": [
     {{
       "type_question": "Conceptuelle" ou "Calcul",
-      "question": "Énoncé de la question.",
+      "question": "...",
       "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
-      "reponses_correctes": ["A", "C"],
-      "explication": "Détail : A (VRAI) : justification...",
-      "source_cours": "Préciser la source."
+      "reponses_correctes": ["A"],
+      "explication": "Justification lettre par lettre...",
+      "source_cours": "Source (ex: Diapositive sur la méiose)..."
     }}
   ]
 }}
 """
 
-# ==============================================================================
-# 4. Fonctions de Traitement de l'IA
-# ==============================================================================
-def extraire_images_pdf(buffer_fichier, page_debut, page_fin):
+def extraire_images_pdf_optimise(buffer_fichier, page_debut, page_fin):
+    """Extrait les pages en images mais avec une résolution optimisée pour éviter les crashs sur les gros PDF"""
     buffer_fichier.seek(0)
     doc = fitz.open(stream=buffer_fichier.read(), filetype="pdf")
     images = []
     for i in range(page_debut - 1, min(page_fin, len(doc))):
         page = doc[i]
-        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+        # On utilise 1.5 au lieu de 2. L'image est lisible par l'IA mais 2x moins lourde en mémoire.
+        pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         images.append(img)
     doc.close()
@@ -133,16 +95,13 @@ def lire_word(buffer_fichier):
     return "\n".join([para.text for para in doc.paragraphs])
 
 def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen):
-    notes = texte_word if texte_word else "Aucune note personnelle fournie."
+    notes = texte_word if texte_word else "Aucune note."
+    style = "Style ANNALES (Difficile, 'Parmi les propositions suivantes...')" if est_mode_examen else "Style APPRENTISSAGE (Direct, clair)."
     
-    if est_mode_examen:
-        style = "Style ANNALES DE CONCOURS : Utilise 'Parmi les propositions suivantes, laquelle (lesquelles) est (sont) exacte(s) ?'. Propositions longues, pièges vicieux, et proposition E 'Aucune des propositions ci-dessus n'est exacte'."
-    else:
-        style = "Style ENTRAÎNEMENT CLASSIQUE : Pose des questions directes d'apprentissage (ex: 'Quel est le rôle de...')."
-
     prompt_final = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, notes_etudiant=notes, style_question=style)
     
     model = genai.GenerativeModel('gemini-2.5-flash')
+    # On envoie le prompt + la liste des images optimisées
     reponse = model.generate_content(
         [prompt_final] + images_pdf, 
         generation_config={"response_mime_type": "application/json", "temperature": 0.2}
@@ -150,202 +109,125 @@ def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est
     return json.loads(reponse.text)
 
 # ==============================================================================
-# 5. Interface Latérale
+# 4. Interface Sidebar
 # ==============================================================================
 with st.sidebar:
-    st.header("⚙️ Configuration API")
-    api_key = st.text_input("Clé Google Gemini :", type="password")
-    if api_key: 
-        genai.configure(api_key=api_key)
-    
+    st.header("⚙️ Configuration")
+    api_key = st.text_input("Clé API Gemini :", type="password")
+    if api_key: genai.configure(api_key=api_key)
     st.divider()
-    st.header("📚 Réglages")
-    matiere = st.selectbox("Matière :", ["Biologie / Biochimie", "Épidémiologie / Biostats", "Anatomie (Théorie)", "Pharmacologie", "Droit Médical"])
-    difficulte = st.slider("Difficulté (1-10) :", 1, 10, 8)
+    matiere = st.selectbox("Matière :", ["Biologie / Biochimie", "Épidémiologie / Biostats", "Anatomie", "Pharmacologie", "Droit Médical"])
+    difficulte = st.slider("Difficulté :", 1, 10, 8)
     nombre_qcm = st.number_input("Nombre de questions :", 1, 30, 5)
-    
-    st.divider()
-    mode_examen = st.toggle("🚨 Activer le Mode Examen", help="Style concours et masque les corrections intermédiaires.")
+    mode_examen = st.toggle("🚨 Activer le Mode Examen")
 
 # ==============================================================================
-# 6. Espace Principal (Upload)
+# 5. Application Principale
 # ==============================================================================
-st.title("🎓 Simulateur de Concours LAS 1")
+st.title("🎓 Simulateur LAS 1")
 
-col_upload1, col_upload2 = st.columns(2)
-with col_upload1:
-    fichier_pdf = st.file_uploader("1. Cours complet (PDF)", type=['pdf'])
-with col_upload2:
-    fichier_word = st.file_uploader("2. Tes fiches (Word .docx) - Optionnel", type=['docx'])
+c1, c2 = st.columns(2)
+with c1: f_pdf = st.file_uploader("1. PDF du cours", type=['pdf'])
+with c2: f_word = st.file_uploader("2. Tes fiches (Word) - Optionnel", type=['docx'])
 
-if fichier_pdf:
-    doc_temp = fitz.open(stream=fichier_pdf.read(), filetype="pdf")
-    total_pages = len(doc_temp)
-    doc_temp.close()
+if f_pdf:
+    doc_t = fitz.open(stream=f_pdf.read(), filetype="pdf")
+    p_tot = len(doc_t)
+    doc_t.close()
     
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        page_deb, page_fin = st.slider("Pages du PDF à analyser :", 1, total_pages, (1, min(5, total_pages)))
+    p_deb, p_fin = st.slider("Pages à analyser :", 1, p_tot, (1, p_tot))
     
-    with col2:
-        st.write("") 
-        st.write("")
-        texte_bouton = "🧠 Générer les Annales (Mode Examen)" if mode_examen else "🧠 Générer l'Entraînement"
-        
-        if st.button(texte_bouton, type="primary", use_container_width=True):
-            if not api_key: 
-                st.error("⚠️ Clé API manquante.")
-            else:
-                with st.spinner("L'IA prépare tes questions..."):
-                    try:
-                        imgs_pdf = extraire_images_pdf(fichier_pdf, page_deb, page_fin)
-                        texte_fiches = lire_word(fichier_word) if fichier_word else ""
-                        st.session_state['data'] = generer_donnees(imgs_pdf, texte_fiches, matiere, difficulte, nombre_qcm, mode_examen)
-                        st.session_state['examen_soumis'] = False
-                    except Exception as e: 
-                        st.error(f"Erreur : {e}")
+    if st.button("🧠 Lancer la génération", type="primary", use_container_width=True):
+        if not api_key: st.error("Clé API manquante !")
+        else:
+            with st.spinner(f"L'IA scanne visuellement tes {p_fin - p_deb + 1} pages..."):
+                try:
+                    imgs = extraire_images_pdf_optimise(f_pdf, p_deb, p_fin)
+                    t_word = lire_word(f_word) if f_word else ""
+                    
+                    st.session_state['data'] = generer_donnees(imgs, t_word, matiere, difficulte, nombre_qcm, mode_examen)
+                    st.session_state['examen_soumis'] = False
+                except Exception as e: st.error(f"Erreur technique : {e}")
 
 # ==============================================================================
-# 7. Zone de QCM et Cahier d'Erreurs
+# 6. Affichage Sécurisé
 # ==============================================================================
 if 'data' in st.session_state:
-    st.divider()
     data = st.session_state['data']
     liste_qcm = data.get('qcm', [])
     
-    # NOUVEAU : 4ème onglet pour le cahier d'erreurs
-    tab1, tab2, tab3, tab4 = st.tabs(["📖 Fiche", "✍️ QCM", "🗂️ Exporter", "📓 Cahier d'Erreurs"])
+    t1, t2, t3, t4 = st.tabs(["📖 Fiche", "✍️ QCM", "🗂️ Anki", "📓 Cahier d'Erreurs"])
 
-    with tab1:
-        st.markdown(f"<div class='synth-box'><h3>📌 L'essentiel</h3><p>{data.get('fiche_synthese', '')}</p></div>", unsafe_allow_html=True)
+    with t1: st.markdown(f"<div class='synth-box'><h3>📌 Synthèse</h3>{data.get('fiche_synthese', '')}</div>", unsafe_allow_html=True)
 
-    with tab2:
-        if not st.session_state.get('examen_soumis', False):
-            if mode_examen:
-                st.warning("🚨 **MODE EXAMEN ACTIF** : Coche tes réponses, puis valide ta copie tout en bas.")
-            else:
-                st.info("💡 **MODE ENTRAÎNEMENT ACTIF** : Vérifie sous chaque question, ou tout corriger d'un coup.")
-                
+    with t2:
+        if not liste_qcm or len(liste_qcm) == 0:
+            st.error("⚠️ L'IA a lu trop d'images d'un coup et a oublié de rédiger les questions. Réduis légèrement le nombre de pages et relance !")
+        
+        elif not st.session_state.get('examen_soumis'):
+            if mode_examen: st.warning("🚨 **MODE EXAMEN ACTIF** : Coche tes réponses, puis valide ta copie tout en bas.")
+            
             for i, q in enumerate(liste_qcm):
-                st.markdown(f"### Question {i+1} :")
-                st.write(f"*{q.get('question', '')}*")
-
-                col_gauche, col_droite = st.columns(2)
+                st.markdown(f"**Question {i+1}** : {q.get('question', '')}")
+                opts = list(q.get('options', {}).items())
+                cols = st.columns(2)
+                if f"choix_{i}" not in st.session_state: st.session_state[f"choix_{i}"] = []
+                cochees = []
+                for idx, (l, t) in enumerate(opts):
+                    target = cols[0] if idx % 2 == 0 else cols[1]
+                    if target.checkbox(f"{l}. {t}", key=f"chk_{i}_{l}"): cochees.append(l)
+                st.session_state[f"choix_{i}"] = cochees
                 
-                if f"choix_{i}" not in st.session_state:
-                    st.session_state[f"choix_{i}"] = []
-                
-                reponses_cochees = []
-                options_list = list(q.get('options', {}).items())
-                
-                for idx_opt, (lettre, texte) in enumerate(options_list):
-                    col = col_gauche if idx_opt % 2 == 0 else col_droite
-                    if col.checkbox(f"{lettre}. {texte}", key=f"chk_{i}_{lettre}"):
-                        reponses_cochees.append(lettre)
-                
-                st.session_state[f"choix_{i}"] = reponses_cochees
-
                 if not mode_examen:
-                    if st.button(f"Vérifier la question {i+1}", key=f"btn_verif_{i}"):
+                    if st.button(f"Vérifier Q{i+1}", key=f"v_{i}"):
                         bonnes = sorted([str(b).strip() for b in q.get('reponses_correctes', [])])
-                        mes_choix = sorted(reponses_cochees)
-                        
-                        est_juste = (mes_choix == bonnes and len(bonnes) > 0)
-                        
-                        if est_juste:
-                            st.success(f"✅ Vrai ! Les bonnes réponses : {', '.join(bonnes)}")
+                        mes_choix = sorted(cochees)
+                        if mes_choix == bonnes and len(bonnes) > 0: st.success("Vrai !")
                         else:
-                            st.error(f"❌ Faux ! Les bonnes réponses : {', '.join(bonnes)}")
-                            # Enregistrement direct si l'étudiant vérifie une par une
-                            sauvegarder_erreur(matiere, q.get('question', ''), ", ".join(mes_choix) if mes_choix else "Aucune", ", ".join(bonnes), q.get('explication', ''))
-                        
+                            st.error(f"Faux ! Rep: {', '.join(bonnes)}")
+                            ajouter_erreur_session(matiere, q.get('question', ''), ", ".join(mes_choix) if mes_choix else "Aucune", ", ".join(bonnes), q.get('explication', ''))
                         st.info(f"**Correction :**\n{q.get('explication', '')}")
-                
                 st.divider()
             
             texte_bouton_final = "🏁 Valider ma copie et enregistrer mes erreurs" if mode_examen else "✅ Tout corriger et enregistrer mes erreurs"
             if st.button(texte_bouton_final, type="primary", use_container_width=True):
                 st.session_state['examen_soumis'] = True
                 st.rerun()
-        
         else:
-            st.subheader("📊 Bilan")
             score = 0
-            
             for i, q in enumerate(liste_qcm):
                 bonnes = sorted([str(b).strip() for b in q.get('reponses_correctes', [])])
                 mes_choix = sorted(st.session_state.get(f"choix_{i}", []))
+                juste = (mes_choix == bonnes and len(bonnes) > 0)
+                if juste: score += 1
+                else: ajouter_erreur_session(matiere, q.get('question', ''), ", ".join(mes_choix) if mes_choix else "Aucune", ", ".join(bonnes), q.get('explication', ''))
                 
-                est_juste = (mes_choix == bonnes and len(bonnes) > 0)
-                if est_juste: 
-                    score += 1
-                else:
-                    # Enregistrement massif des erreurs dans le fichier mémoire
-                    sauvegarder_erreur(matiere, q.get('question', ''), ", ".join(mes_choix) if mes_choix else "Aucune", ", ".join(bonnes), q.get('explication', ''))
-                
-                div_class = "correct-box" if est_juste else "error-box"
-                statut = "✅ JUSTE" if est_juste else "❌ FAUX"
-                
-                st.markdown(f"""
-                <div class="{div_class}">
-                    <strong>Question {i+1} : {statut}</strong><br>
-                    <em>{q.get('question', '')}</em>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                c1, c2 = st.columns(2)
-                c1.write(f"**Tes choix :** {', '.join(mes_choix) if mes_choix else 'Aucune'}")
-                c2.write(f"**Corrigé :** {', '.join(bonnes)}")
-                
-                with st.expander("🔍 Voir la correction détaillée"):
-                    st.write(q.get('explication', ''))
-                st.write("<br>", unsafe_allow_html=True)
-            
-            if len(liste_qcm) > 0:
-                st.metric("Ta Note Finale", f"{(score / len(liste_qcm)) * 20:.1f} / 20")
-            
-            if st.button("🔄 Refaire un nouveau test"):
-                st.session_state['examen_soumis'] = False
-                st.rerun()
+                st.markdown(f"<div class='{'correct-box' if juste else 'error-box'}'><strong>Q{i+1} : {'✅' if juste else '❌'}</strong><br>{q.get('question', '')}</div>", unsafe_allow_html=True)
+                st.write(f"Ton choix: {', '.join(mes_choix) if mes_choix else 'Aucune'} | Correction: {', '.join(bonnes)}")
+                with st.expander("Détails"): st.write(q.get('explication', ''))
+            st.metric("Note", f"{(score/len(liste_qcm))*20:.1f} / 20")
+            if st.button("Recommencer un nouveau test"): st.session_state['examen_soumis'] = False; st.rerun()
 
-    with tab3:
+    with t3:
         try:
-            df_anki = pd.DataFrame({
-                "Recto": [q.get("question", "") + " | " + str(q.get("options", {})) for q in liste_qcm],
-                "Verso": [f"{q.get('reponses_correctes', '')} | {q.get('explication', '')}" for q in liste_qcm]
-            })
-            st.download_button("📥 Télécharger CSV", df_anki.to_csv(index=False, sep=";").encode('utf-8'), "flashcards.csv", "text/csv")
-        except:
-            st.error("Export indisponible.")
+            anki_df = pd.DataFrame({"Q": [q.get('question', '') for q in liste_qcm], "R": [f"{q.get('reponses_correctes', '')} | {q.get('explication', '')}" for q in liste_qcm]})
+            st.download_button("📥 Anki CSV", anki_df.to_csv(index=False, sep=";").encode('utf-8'), "anki.csv")
+        except: st.error("Export indisponible")
 
-    # --- NOUVEL ONGLET CAHIER D'ERREURS ---
-    with tab4:
-        st.subheader("📓 Ton Cahier d'Erreurs Persistant")
-        erreurs_memoire = charger_erreurs()
-        
-        if not erreurs_memoire:
-            st.success("✨ Ton cahier est vide ! Tu n'as fait aucune erreur pour l'instant.")
+    with t4:
+        st.subheader("📓 Mon Cahier d'Erreurs de la Session")
+        mem = st.session_state.get('cahier_memoire', {})
+        if not mem: st.info("Aucune erreur enregistrée pour le moment.")
         else:
-            matieres_dispo = list(erreurs_memoire.keys())
-            choix_matiere = st.selectbox("Voir mes erreurs en :", ["Toutes les matières"] + matieres_dispo)
+            texte_word = ""
+            for mat, errs in mem.items():
+                texte_word += f"--- MATIÈRE : {mat} ---\n"
+                for e in errs:
+                    texte_word += f"Date: {e['date']}\nQ: {e['question']}\nMon erreur: {e['choix_user']}\nBonne rep: {e['bonnes_rep']}\nExplication: {e['explication']}\n\n"
             
-            # Filtrage selon le choix
-            for mat, liste_err in erreurs_memoire.items():
-                if choix_matiere == "Toutes les matières" or choix_matiere == mat:
-                    st.markdown(f"### 📘 {mat}")
-                    for err in reversed(liste_err): # Afficher les plus récentes en premier
-                        st.markdown(f"""
-                        <div class="erreur-log">
-                            <small style="color: gray;">Erreur du {err['date']}</small><br>
-                            <strong>Question :</strong> {err['question']}<br><br>
-                            <span style="color: #d9534f;">❌ Tu avais répondu : {err['choix_user']}</span><br>
-                            <span style="color: #5cb85c;">✅ Il fallait répondre : {err['bonnes_rep']}</span>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        with st.expander("Voir le rappel de cours"):
-                            st.write(err['explication'])
-                    st.write("---")
+            st.download_button("📝 Télécharger pour coller dans Word", texte_word, "mes_erreurs.txt")
             
-            if st.button("🗑️ Vider tout mon cahier d'erreurs", type="secondary"):
-                effacer_cahier()
-                st.rerun()
+            for mat, errs in mem.items():
+                with st.expander(f"Matière : {mat} ({len(errs)} erreurs)"):
+                    for e in reversed(errs):
+                        st.markdown(f"<div class='erreur-log'><strong>{e['question']}</strong><br><span style='color:red'>Choix: {e['choix_user']}</span> | <span style='color:green'>Rep: {e['bonnes_rep']}</span><br><small>{e['explication']}</small></div>", unsafe_allow_html=True)
