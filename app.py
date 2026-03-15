@@ -1,6 +1,5 @@
 import streamlit as st
 import fitz  # PyMuPDF
-from PIL import Image
 import google.generativeai as genai
 import json
 import pandas as pd
@@ -48,7 +47,7 @@ def ajouter_erreur_session(matiere, question, choix_user, bonnes_rep, explicatio
     })
 
 # ==============================================================================
-# 3. Moteur IA Multi-Modal (Vision optimisée)
+# 3. Moteur IA (Consignes recalibrées pour QCM et Synthèse)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur d'Université expert en LAS 1. 
@@ -56,54 +55,51 @@ Matière : {matiere} | Difficulté : {difficulte}/10 | Nombre : {nombre_qcm}
 
 STYLE : {style_question}
 
-MIXAGE : Analyse attentivement les IMAGES fournies (qui contiennent des schémas, tableaux et textes). Base-toi 50% sur ces images et 50% sur les notes de l'étudiant : "{notes_etudiant}"
+MIXAGE : Base-toi 50% sur le texte du COURS OFFICIEL fourni et 50% sur les notes de l'étudiant : "{notes_etudiant}"
 
-⚠️ RÈGLE ABSOLUE : Tu DOIS IMPÉRATIVEMENT générer EXACTEMENT {nombre_qcm} questions dans la liste "qcm". Même si le diaporama est très long, sélectionne les informations les plus cruciales (High Yield) pour créer tes questions.
+⚠️ RÈGLE SUR LA SYNTHÈSE : Tu dois produire une fiche de synthèse EXHAUSTIVE, LONGUE et TRÈS BIEN STRUCTURÉE. Utilise le Markdown (titres ###, puces -, mots-clés en **gras**). Ne bâcle surtout pas cette partie, elle est vitale pour l'étudiant.
+⚠️ RÈGLE SUR LES QCM : Tu DOIS IMPÉRATIVEMENT générer EXACTEMENT {nombre_qcm} questions. Ce sont de VRAIS QCM : il y a très souvent PLUSIEURS propositions exactes (ex: A, C et D). Ne fais surtout pas que des questions à choix unique (QCU).
 
 FORMAT JSON STRICT :
 {{
-  "fiche_synthese": "Résumé...",
+  "fiche_synthese": "### Titre 1\\n- **Concept clé** : explication...\\n### Titre 2\\n- ...",
   "qcm": [
     {{
       "type_question": "Conceptuelle" ou "Calcul",
       "question": "...",
       "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
-      "reponses_correctes": ["A"],
+      "reponses_correctes": ["A", "C", "D"],
       "explication": "Justification lettre par lettre...",
-      "source_cours": "Source (ex: Diapositive sur la méiose)..."
+      "source_cours": "Source (ex: Page 12)..."
     }}
   ]
 }}
 """
 
-def extraire_images_pdf_optimise(buffer_fichier, page_debut, page_fin):
-    """Extrait les pages en images mais avec une résolution optimisée pour éviter les crashs sur les gros PDF"""
+def extraire_texte_pdf(buffer_fichier, page_debut, page_fin):
     buffer_fichier.seek(0)
     doc = fitz.open(stream=buffer_fichier.read(), filetype="pdf")
-    images = []
+    texte_complet = ""
     for i in range(page_debut - 1, min(page_fin, len(doc))):
-        page = doc[i]
-        # On utilise 1.5 au lieu de 2. L'image est lisible par l'IA mais 2x moins lourde en mémoire.
-        pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
-        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-        images.append(img)
+        texte_complet += f"\n\n--- PAGE {i+1} ---\n\n"
+        texte_complet += doc[i].get_text("text")
     doc.close()
-    return images
+    return texte_complet
 
 def lire_word(buffer_fichier):
     doc = docx.Document(buffer_fichier)
     return "\n".join([para.text for para in doc.paragraphs])
 
-def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen):
+def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen):
     notes = texte_word if texte_word else "Aucune note."
-    style = "Style ANNALES (Difficile, 'Parmi les propositions suivantes...')" if est_mode_examen else "Style APPRENTISSAGE (Direct, clair)."
+    style = "Style ANNALES (Très Difficile, QCM à choix multiples, utilise souvent la formulation 'Parmi les propositions suivantes...' et la proposition E 'Aucune n'est exacte')." if est_mode_examen else "Style APPRENTISSAGE (Direct, clair, questions à choix multiples)."
     
     prompt_final = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, notes_etudiant=notes, style_question=style)
+    contenu_requete = f"TEXTE DU COURS OFFICIEL À ANALYSER :\n{texte_pdf}"
     
     model = genai.GenerativeModel('gemini-2.5-flash')
-    # On envoie le prompt + la liste des images optimisées
     reponse = model.generate_content(
-        [prompt_final] + images_pdf, 
+        [prompt_final, contenu_requete], 
         generation_config={"response_mime_type": "application/json", "temperature": 0.2}
     )
     return json.loads(reponse.text)
@@ -140,12 +136,12 @@ if f_pdf:
     if st.button("🧠 Lancer la génération", type="primary", use_container_width=True):
         if not api_key: st.error("Clé API manquante !")
         else:
-            with st.spinner(f"L'IA scanne visuellement tes {p_fin - p_deb + 1} pages..."):
+            with st.spinner(f"Lecture et rédaction de la synthèse des {p_fin - p_deb + 1} pages..."):
                 try:
-                    imgs = extraire_images_pdf_optimise(f_pdf, p_deb, p_fin)
+                    texte_cours = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                     t_word = lire_word(f_word) if f_word else ""
                     
-                    st.session_state['data'] = generer_donnees(imgs, t_word, matiere, difficulte, nombre_qcm, mode_examen)
+                    st.session_state['data'] = generer_donnees(texte_cours, t_word, matiere, difficulte, nombre_qcm, mode_examen)
                     st.session_state['examen_soumis'] = False
                 except Exception as e: st.error(f"Erreur technique : {e}")
 
@@ -162,7 +158,7 @@ if 'data' in st.session_state:
 
     with t2:
         if not liste_qcm or len(liste_qcm) == 0:
-            st.error("⚠️ L'IA a lu trop d'images d'un coup et a oublié de rédiger les questions. Réduis légèrement le nombre de pages et relance !")
+            st.error("⚠️ Oups, une erreur s'est produite lors de la génération. Clique sur 'Lancer la génération' à nouveau.")
         
         elif not st.session_state.get('examen_soumis'):
             if mode_examen: st.warning("🚨 **MODE EXAMEN ACTIF** : Coche tes réponses, puis valide ta copie tout en bas.")
