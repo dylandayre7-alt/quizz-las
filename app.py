@@ -59,7 +59,7 @@ def ajouter_erreur_session(matiere, question, choix_user, bonnes_rep, explicatio
     })
 
 # ==============================================================================
-# 3. Moteur IA 
+# 3. Moteur IA (Amélioration de la Diversité des Questions)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur d'Université expert en LAS 1. 
@@ -70,11 +70,13 @@ MIXAGE : Base-toi 50% sur le texte du COURS OFFICIEL fourni et 50% sur les notes
 
 ⚠️ RÈGLE DE SYNTAXE ABSOLUE : Tu ne dois JAMAIS utiliser de guillemets doubles (") à l'intérieur de tes phrases de texte. Utilise EXCLUSIVEMENT des guillemets simples (').
 
-⚠️ RÈGLES PÉDAGOGIQUES (TRÈS IMPORTANT) :
-1. SYNTHÈSE : Rédige une fiche de synthèse extrêmement détaillée, précise et exhaustive du cours. Ne la bâcle pas. Reprends les définitions, les mécanismes et les détails cruciaux. Utilise une belle mise en forme Markdown.
-2. QCM : Génère EXACTEMENT {nombre_qcm} questions. Ce sont des QCM médicaux : prévois souvent PLUSIEURS réponses exactes par question (ex: A et C).
-3. "indice" : Fournis un indice subtil.
-4. "mnemotechnique" : Invente une astuce mentale pour retenir l'information.
+⚠️ RÈGLES PÉDAGOGIQUES ET VARIÉTÉ (TRÈS IMPORTANT) :
+1. RÉPARTITION EXTRÊME : Tu dois OBLIGATOIREMENT balayer l'ENSEMBLE du document (début, milieu, fin). Il est formellement interdit de tirer toutes les questions du même paragraphe.
+2. DIVERSITÉ : Alterne les types de pièges. Fais des questions sur des Définitions, sur des Mécanismes, sur des Exceptions/Pièges absolus, et sur des Chiffres/Dates si le cours s'y prête.
+3. SYNTHÈSE : Rédige une fiche de synthèse extrêmement détaillée, précise et exhaustive du cours.
+4. QCM : Génère EXACTEMENT {nombre_qcm} questions. Prévois souvent PLUSIEURS réponses exactes par question (ex: A et C).
+5. "indice" : Fournis un indice subtil pour activer la mémoire.
+6. "mnemotechnique" : Invente une astuce mentale puissante.
 
 FORMAT JSON STRICT :
 {{
@@ -116,9 +118,11 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     contenu_requete = f'TEXTE DU COURS OFFICIEL À ANALYSER :\n{texte_pdf}'
     
     model = genai.GenerativeModel('gemini-2.5-flash')
+    
+    # NOUVEAUTÉ ICI : Température passée à 0.4 pour forcer la variété et l'originalité des questions
     reponse = model.generate_content(
         [prompt_final, contenu_requete], 
-        generation_config={'response_mime_type': 'application/json', 'temperature': 0.2}
+        generation_config={'response_mime_type': 'application/json', 'temperature': 0.4}
     )
     
     texte_brut = reponse.text.strip()
@@ -160,7 +164,7 @@ if f_pdf:
     if st.button("🧠 Lancer la génération", type="primary", use_container_width=True):
         if not api_key: st.error("Clé API manquante !")
         else:
-            with st.spinner(f"Lecture et rédaction de la synthèse des {p_fin - p_deb + 1} pages..."):
+            with st.spinner(f"Lecture et création de pièges variés sur {p_fin - p_deb + 1} pages..."):
                 try:
                     texte_cours = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                     t_word = lire_word(f_word) if f_word else ""
