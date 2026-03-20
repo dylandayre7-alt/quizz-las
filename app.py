@@ -59,7 +59,7 @@ def ajouter_erreur_session(matiere, question, choix_user, bonnes_rep, explicatio
     })
 
 # ==============================================================================
-# 3. Moteur IA (Amélioration de la Diversité des Questions)
+# 3. Moteur IA (Corrections Détaillées Améliorées)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur d'Université expert en LAS 1. 
@@ -70,24 +70,24 @@ MIXAGE : Base-toi 50% sur le texte du COURS OFFICIEL fourni et 50% sur les notes
 
 ⚠️ RÈGLE DE SYNTAXE ABSOLUE : Tu ne dois JAMAIS utiliser de guillemets doubles (") à l'intérieur de tes phrases de texte. Utilise EXCLUSIVEMENT des guillemets simples (').
 
-⚠️ RÈGLES PÉDAGOGIQUES ET VARIÉTÉ (TRÈS IMPORTANT) :
-1. RÉPARTITION EXTRÊME : Tu dois OBLIGATOIREMENT balayer l'ENSEMBLE du document (début, milieu, fin). Il est formellement interdit de tirer toutes les questions du même paragraphe.
-2. DIVERSITÉ : Alterne les types de pièges. Fais des questions sur des Définitions, sur des Mécanismes, sur des Exceptions/Pièges absolus, et sur des Chiffres/Dates si le cours s'y prête.
-3. SYNTHÈSE : Rédige une fiche de synthèse extrêmement détaillée, précise et exhaustive du cours.
-4. QCM : Génère EXACTEMENT {nombre_qcm} questions. Prévois souvent PLUSIEURS réponses exactes par question (ex: A et C).
-5. "indice" : Fournis un indice subtil pour activer la mémoire.
-6. "mnemotechnique" : Invente une astuce mentale puissante.
+⚠️ RÈGLES PÉDAGOGIQUES (TRÈS IMPORTANT) :
+1. RÉPARTITION EXTRÊME : Balaye l'ENSEMBLE du document. Alterne les pièges (Définitions, Mécanismes, Exceptions).
+2. SYNTHÈSE : Rédige une fiche de synthèse extrêmement détaillée.
+3. QCM : Génère EXACTEMENT {nombre_qcm} questions.
+4. CORRECTION DÉTAILLÉE : C'est vital ! L'explication doit reprendre CHAQUE proposition (A, B, C, D, E) sous forme de liste. Pour chaque lettre, indique en majuscule si c'est VRAI ou FAUX. Pour les propositions fausses, explique précisément où est le piège ou l'erreur.
+5. "indice" : Fournis un indice subtil.
+6. "mnemotechnique" : Invente une astuce mentale.
 
 FORMAT JSON STRICT :
 {{
-  "fiche_synthese": "Ton résumé de cours complet, détaillé et structuré ici...",
+  "fiche_synthese": "Ton résumé de cours complet...",
   "qcm": [
     {{
       "type_question": "Conceptuelle" ou "Calcul",
       "question": "...",
       "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
       "reponses_correctes": ["A", "C"],
-      "explication": "Justification lettre par lettre...",
+      "explication": "- **A) VRAI** : explication...\\n- **B) FAUX** : explication du piège...\\n- **C) VRAI** : explication...\\n- **D) FAUX** : explication...\\n- **E) FAUX** : explication...",
       "source_cours": "Source...",
       "indice": "Indice...",
       "mnemotechnique": "Astuce..."
@@ -119,7 +119,6 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     
     model = genai.GenerativeModel('gemini-2.5-flash')
     
-    # NOUVEAUTÉ ICI : Température passée à 0.4 pour forcer la variété et l'originalité des questions
     reponse = model.generate_content(
         [prompt_final, contenu_requete], 
         generation_config={'response_mime_type': 'application/json', 'temperature': 0.4}
@@ -224,7 +223,10 @@ if 'data' in st.session_state:
                         else:
                             st.error(f"Faux ! Rep: {', '.join(bonnes)}")
                             ajouter_erreur_session(matiere, q.get('question', ''), ", ".join(mes_choix) if mes_choix else "Aucune", ", ".join(bonnes), q.get('explication', ''))
-                        st.success(f"**Correction détaillée :**\n{q.get('explication', '')}")
+                        
+                        st.success("**Correction détaillée :**")
+                        # Utilisation de st.markdown pour bien afficher la liste avec les retours à la ligne
+                        st.markdown(q.get('explication', ''))
                 st.divider()
             
             texte_bouton_final = "🏁 Valider ma copie et enregistrer mes erreurs" if mode_examen else "✅ Tout corriger et enregistrer mes erreurs"
@@ -243,7 +245,7 @@ if 'data' in st.session_state:
                 st.markdown(f"<div class='{'correct-box' if juste else 'error-box'}'><strong>Q{i+1} : {'✅' if juste else '❌'}</strong><br>{q.get('question', '')}</div>", unsafe_allow_html=True)
                 st.write(f"Ton choix: {', '.join(mes_choix) if mes_choix else 'Aucune'} | Correction: {', '.join(bonnes)}")
                 with st.expander("Détails"): 
-                    st.write(q.get('explication', ''))
+                    st.markdown(q.get('explication', ''))
                     st.info(f"**💡 Astuce pour la prochaine fois :** {q.get('mnemotechnique', '')}")
 
             st.metric("Note", f"{(score/len(liste_qcm))*20:.1f} / 20")
