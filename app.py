@@ -50,7 +50,7 @@ def ajouter_erreur_session(matiere, question, choix_user, bonnes_rep, explicatio
     })
 
 # ==============================================================================
-# 3. Moteur IA (Le vrai moteur 2.5 Flash, robuste et moderne)
+# 3. Moteur IA (Architecture en Listes Anti-Crash)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en LAS 1. 
@@ -59,17 +59,22 @@ Matière : {matiere} | Difficulté : {difficulte}/10 | Nombre total de QCM : {no
 STYLE : {style_question}
 NOTES DE L'ÉTUDIANT : "{notes_etudiant}"
 
-⚠️ RÈGLE DE SYNTAXE ABSOLUE : N'utilise JAMAIS de guillemets doubles (") dans tes textes. Utilise EXCLUSIVEMENT des guillemets simples (').
+⚠️ RÈGLE DE SYNTAXE ABSOLUE (POUR NE PAS FAIRE PLANTER LE SITE) :
+Pour contourner le bug des sauts de ligne, "fiche_synthese" et "explication" DOIVENT OBLIGATOIREMENT ÊTRE DES LISTES DE PHRASES (des arrays JSON), et non pas de longs textes uniques ! Chaque paragraphe est un élément de la liste. N'utilise jamais de guillemets doubles (") dans le texte.
 
-⚠️ MISSION GLOBALE SUR TOUT LE DOCUMENT :
-1. SYNTHÈSE : Fais un résumé global, structuré et détaillé.
-2. CONCEPTS CLÉS (EXHAUSTIVITÉ TOTALE) : Extrais LE PLUS GRAND NOMBRE POSSIBLE de concepts (vise 20 à 40 concepts minimum !). Sois chirurgical : 1 phrase courte pour son Rôle, 1 pour son Objectif, 1 pour ses Interactions, et 1 pour son Fonctionnement.
+⚠️ MISSION GLOBALE :
+1. SYNTHÈSE : Fais un résumé global, structuré et détaillé (Divisé en liste de paragraphes).
+2. CONCEPTS CLÉS : Vise 20 à 40 concepts minimum. (1 phrase courte par critère).
 3. QCM : Génère EXACTEMENT {nombre_qcm} questions.
-4. CORRECTION DÉTAILLÉE : Sous forme de liste pour chaque proposition (A, B, C, D, E) avec VRAI ou FAUX en gras.
+4. CORRECTION DÉTAILLÉE : Crée une liste où chaque élément explique une proposition (A, B, C, D, E) avec VRAI ou FAUX.
 
-FORMAT JSON STRICT :
+FORMAT JSON STRICT (RESPECTE BIEN LES CROCHETS [] POUR LA SYNTHÈSE ET L'EXPLICATION) :
 {{
-  "fiche_synthese": "Résumé...",
+  "fiche_synthese": [
+    "### Grand Titre 1",
+    "Premier paragraphe de synthèse...",
+    "Deuxième paragraphe..."
+  ],
   "concepts_cles": [
     {{
       "nom": "Nom...", "role": "Rôle...", "objectif": "But...", "avec_quoi": "Interactions...", "comment": "Fonctionnement..."
@@ -80,7 +85,11 @@ FORMAT JSON STRICT :
       "type_question": "Conceptuelle", "question": "...",
       "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
       "reponses_correctes": ["A", "C"],
-      "explication": "- **A) VRAI** : ...\\n- **B) FAUX** : ...",
+      "explication": [
+        "- **A) VRAI** : explication...",
+        "- **B) FAUX** : explication...",
+        "- **C) VRAI** : explication..."
+      ],
       "source_cours": "Source...", "indice": "Indice...", "mnemotechnique": "Astuce..."
     }}
   ]
@@ -108,7 +117,6 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     prompt_final = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, notes_etudiant=notes, style_question=style)
     contenu_requete = f'TEXTE À ANALYSER :\n{texte_pdf}'
     
-    # LE BON MOTEUR 
     model = genai.GenerativeModel('gemini-2.5-flash')
     
     reponse = model.generate_content(
@@ -160,7 +168,7 @@ if f_pdf:
         if not api_key: 
             st.error("Clé API manquante !")
         else:
-            with st.spinner(f"L'IA extrait massivement les concepts et QCM de tes {p_fin - p_deb + 1} pages..."):
+            with st.spinner(f"L'IA extrait massivement les concepts et QCM de tes {p_fin - p_deb + 1} pages sans crasher..."):
                 try:
                     texte_cours = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                     t_word = lire_word(f_word) if f_word else ""
@@ -171,9 +179,9 @@ if f_pdf:
                         st.session_state['data'] = json.loads(texte_brut_ia, strict=False)
                         st.session_state['examen_soumis'] = False
                     except json.JSONDecodeError as json_err:
-                        st.error(f"⚠️ L'IA a fait une faute de frappe tenace (Erreur : {json_err}).")
-                        st.warning("👇 Mais voici tout le travail qu'elle a généré en version texte brut :")
-                        with st.expander("Voir le contenu généré (à copier-coller dans un Word)"):
+                        st.error(f"⚠️ Alerte système (Erreur : {json_err}).")
+                        st.warning("👇 Le fichier JSON a vacillé, mais voici tout le travail généré en version texte brut :")
+                        with st.expander("Voir le contenu généré (à copier-coller)"):
                             st.text(texte_brut_ia)
                             
                 except Exception as e: 
@@ -187,10 +195,16 @@ if 'data' in st.session_state:
     liste_qcm = data.get('qcm', [])
     liste_concepts = data.get('concepts_cles', [])
     
+    # Fonction de sécurité pour l'affichage des listes de textes (Synthèse & Explications)
+    def assembler_texte(champ):
+        if isinstance(champ, list): return '\n\n'.join(champ)
+        return str(champ)
+    
     t1, t2, t3, t4, t5 = st.tabs(["📖 Fiche", "🎯 Concepts Clés", "✍️ QCM", "🗂️ Anki", "📓 Cahier d'Erreurs"])
 
     with t1: 
-        st.markdown(f"<div class='synth-box'><h3>📌 Synthèse</h3>{data.get('fiche_synthese', '')}</div>", unsafe_allow_html=True)
+        texte_synthese = assembler_texte(data.get('fiche_synthese', ''))
+        st.markdown(f"<div class='synth-box'><h3>📌 Synthèse</h3>{texte_synthese}</div>", unsafe_allow_html=True)
 
     with t2:
         st.subheader(f"🎯 Les {len(liste_concepts)} Concepts Clés de ce cours")
@@ -238,12 +252,14 @@ if 'data' in st.session_state:
                     if st.button(f"Vérifier Q{i+1}", key=f"v_{i}"):
                         bonnes = sorted([str(b).strip() for b in q.get('reponses_correctes', [])])
                         mes_choix = sorted(cochees)
+                        texte_explication = assembler_texte(q.get('explication', ''))
+                        
                         if mes_choix == bonnes and len(bonnes) > 0: st.success("Vrai !")
                         else:
                             st.error(f"Faux ! Rep: {', '.join(bonnes)}")
-                            ajouter_erreur_session(matiere, q.get('question', ''), ", ".join(mes_choix) if mes_choix else "Aucune", ", ".join(bonnes), q.get('explication', ''))
+                            ajouter_erreur_session(matiere, q.get('question', ''), ", ".join(mes_choix) if mes_choix else "Aucune", ", ".join(bonnes), texte_explication)
                         st.success("**Correction :**")
-                        st.markdown(q.get('explication', ''))
+                        st.markdown(texte_explication)
                 st.divider()
             
             texte_bouton_final = "🏁 Valider ma copie et enregistrer mes erreurs" if mode_examen else "✅ Tout corriger et enregistrer mes erreurs"
@@ -255,14 +271,16 @@ if 'data' in st.session_state:
             for i, q in enumerate(liste_qcm):
                 bonnes = sorted([str(b).strip() for b in q.get('reponses_correctes', [])])
                 mes_choix = sorted(st.session_state.get(f"choix_{i}", []))
+                texte_explication = assembler_texte(q.get('explication', ''))
                 juste = (mes_choix == bonnes and len(bonnes) > 0)
+                
                 if juste: score += 1
-                else: ajouter_erreur_session(matiere, q.get('question', ''), ", ".join(mes_choix) if mes_choix else "Aucune", ", ".join(bonnes), q.get('explication', ''))
+                else: ajouter_erreur_session(matiere, q.get('question', ''), ", ".join(mes_choix) if mes_choix else "Aucune", ", ".join(bonnes), texte_explication)
                 
                 st.markdown(f"<div class='{'correct-box' if juste else 'error-box'}'><strong>Q{i+1} : {'✅' if juste else '❌'}</strong><br>{q.get('question', '')}</div>", unsafe_allow_html=True)
                 st.write(f"Ton choix: {', '.join(mes_choix) if mes_choix else 'Aucune'} | Correction: {', '.join(bonnes)}")
                 with st.expander("Détails"): 
-                    st.markdown(q.get('explication', ''))
+                    st.markdown(texte_explication)
                     st.info(f"**💡 Astuce pour la prochaine fois :** {q.get('mnemotechnique', '')}")
 
             st.metric("Note Finale", f"{(score/len(liste_qcm))*20:.1f} / 20")
@@ -270,7 +288,8 @@ if 'data' in st.session_state:
 
     with t4:
         try:
-            anki_df = pd.DataFrame({"Q": [q.get('question', '') for q in liste_qcm], "R": [f"{q.get('reponses_correctes', '')} | {q.get('explication', '')}" for q in liste_qcm]})
+            # Sécurité pour Anki
+            anki_df = pd.DataFrame({"Q": [q.get('question', '') for q in liste_qcm], "R": [f"{q.get('reponses_correctes', '')} | {assembler_texte(q.get('explication', ''))}" for q in liste_qcm]})
             st.download_button("📥 Anki CSV", anki_df.to_csv(index=False, sep=";").encode('utf-8'), "anki.csv")
         except: st.error("Export indisponible")
 
@@ -283,7 +302,7 @@ if 'data' in st.session_state:
             for mat, errs in mem.items():
                 texte_word += f"--- MATIÈRE : {mat} ---\n"
                 for e in errs:
-                    texte_word += f"Date: {e['date']}\nQ: {e['question']}\nMon erreur: {e['choix_user']}\nBonne rep: {e['bonnes_rep']}\nExplication: {e['explication']}\n\n"
+                    texte_word += f"Date: {e['date']}\nQ: {e['question']}\nMon erreur: {e['choix_user']}\nBonne rep: {e['bonnes_rep']}\nExplication:\n{e['explication']}\n\n"
             
             st.download_button("📝 Télécharger pour coller dans Word", texte_word, "mes_erreurs.txt")
             
