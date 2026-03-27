@@ -77,7 +77,7 @@ def lire_word(buffer_fichier):
     return "\n".join([para.text for para in doc.paragraphs])
 
 # ==============================================================================
-# 3. Moteur IA (Version Sécurisée Anti-Quota)
+# 3. Moteur IA (Version Sécurisée Anti-Quota 1.5 Flash)
 # ==============================================================================
 PROMPT_UNIQUE = """
 Tu es un Professeur expert en LAS 1. 
@@ -130,8 +130,8 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     prompt_final = PROMPT_UNIQUE.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, notes_etudiant=notes, style_question=style)
     contenu_requete = f'TEXTE À ANALYSER :\n{texte_pdf}'
     
-    # 🌟 CHANGEMENT MAJEUR ICI : gemini-2.0-flash a des quotas beaucoup plus élevés !
-    model = genai.GenerativeModel('gemini-2.0-flash')
+    # LE SAUVEUR : gemini-1.5-flash (1500 requêtes gratuites par jour)
+    model = genai.GenerativeModel('gemini-1.5-flash')
     
     reponse = model.generate_content(
         [prompt_final, contenu_requete], 
@@ -177,7 +177,7 @@ if f_pdf:
         if not api_key: 
             st.error("Clé API manquante !")
         else:
-            with st.spinner(f"Analyse en cours (Version Sécurisée Anti-Quota)..."):
+            with st.spinner(f"Analyse en cours avec le moteur optimisé..."):
                 try:
                     texte_cours = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                     t_word = lire_word(f_word) if f_word else ""
@@ -190,7 +190,7 @@ if f_pdf:
                         st.rerun()
                     except json.JSONDecodeError as json_err:
                         st.error(f"⚠️ Erreur de décodage ({json_err}).")
-                        st.warning("👇 Le fichier JSON a vacillé, mais voici tout le travail généré en version texte brut :")
+                        st.warning("👇 Voici tout le travail généré en version texte brut :")
                         with st.expander("Voir le contenu généré (à copier-coller)"):
                             st.text(texte_brut_ia)
                             
