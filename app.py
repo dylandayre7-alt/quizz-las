@@ -34,7 +34,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Gestion de la Mémoire Session
+# 2. Gestion de la Mémoire Session & Utilitaires
 # ==============================================================================
 if 'cahier_memoire' not in st.session_state:
     st.session_state['cahier_memoire'] = {}
@@ -57,6 +57,12 @@ def nettoyer_json(texte):
     texte_brut = re.sub(r'```$', '', texte_brut)
     return texte_brut.strip()
 
+def assembler_texte(champ):
+    """Fonction vitale pour recoller les paragraphes que l'IA a mis dans des listes"""
+    if isinstance(champ, list): 
+        return '\n\n'.join([str(c) for c in champ])
+    return str(champ)
+
 def extraire_texte_pdf(buffer_fichier, page_debut, page_fin):
     buffer_fichier.seek(0)
     doc = fitz.open(stream=buffer_fichier.read(), filetype="pdf")
@@ -72,25 +78,26 @@ def lire_word(buffer_fichier):
     return "\n".join([para.text for para in doc.paragraphs])
 
 # ==============================================================================
-# 3. Moteur IA (ARCHITECTURE BI-TURBO SÉPARÉE)
+# 3. Moteur IA (Architecture BI-TURBO + SÉCURITÉ EN LISTES)
 # ==============================================================================
 
-# --- MOTEUR 1 : LE COURS (Synthèse + Concepts) ---
+# --- MOTEUR 1 : LE COURS ---
 PROMPT_COURS = """
-Tu es un Professeur expert en LAS 1. 
-Matière : {matiere}
+Tu es un Professeur expert en LAS 1. Matière : {matiere}. NOTES DE L'ÉTUDIANT : "{notes_etudiant}"
 
-NOTES DE L'ÉTUDIANT : "{notes_etudiant}"
+⚠️ RÈGLE INFORMATIQUE CRITIQUE : N'utilise JAMAIS de guillemets doubles (") dans tes textes (utilise '). NE FAIS JAMAIS DE RETOURS À LA LIGNE DANS LE JSON. Pour "fiche_synthese", tu DOIS fournir une LISTE (Array) où chaque élément est un paragraphe.
 
-⚠️ RÈGLE DE SYNTAXE : N'utilise JAMAIS de guillemets doubles (") dans tes textes. Utilise des guillemets simples ('). Utilise la balise <br> pour sauter des lignes.
+MISSION 1 :
+1. SYNTHÈSE : Fais un résumé global, structuré sous forme de liste de paragraphes.
+2. CONCEPTS CLÉS : Vise entre 20 et 50 concepts ! Reste très bref (1 phrase par clé).
 
-MISSION 1 (THÉORIE UNIQUEMENT) :
-1. SYNTHÈSE : Fais un résumé global et détaillé.
-2. CONCEPTS CLÉS (EXHAUSTIVITÉ MAXIMALE) : Extrais LE PLUS GRAND NOMBRE POSSIBLE de concepts du texte (vise entre 20 et 50 concepts !). Sois bref pour chaque concept (1 phrase par attribut) afin de pouvoir tous les lister.
-
-FORMAT JSON STRICT :
+FORMAT JSON STRICT (Utilise bien les crochets [] pour la synthèse) :
 {{
-  "fiche_synthese": "Résumé...",
+  "fiche_synthese": [
+    "### Grand Titre",
+    "Paragraphe 1...",
+    "Paragraphe 2..."
+  ],
   "concepts_cles": [
     {{
       "nom": "Nom...", "role": "Rôle...", "objectif": "But...", "avec_quoi": "Interactions...", "comment": "Fonctionnement..."
@@ -99,18 +106,13 @@ FORMAT JSON STRICT :
 }}
 """
 
-# --- MOTEUR 2 : L'ENTRAÎNEMENT (QCM + Correction) ---
+# --- MOTEUR 2 : L'ENTRAÎNEMENT ---
 PROMPT_QCM = """
-Tu es un Professeur expert en LAS 1. 
-Matière : {matiere} | Difficulté : {difficulte}/10 | Nombre total de QCM : {nombre_qcm}
+Tu es un Professeur expert en LAS 1. Matière : {matiere} | Difficulté : {difficulte}/10 | Nombre QCM : {nombre_qcm} | STYLE : {style_question}
 
-STYLE : {style_question}
+⚠️ RÈGLE INFORMATIQUE CRITIQUE : N'utilise JAMAIS de guillemets doubles (") dans tes textes (utilise '). NE FAIS JAMAIS DE RETOURS À LA LIGNE. L'explication DOIT être une LISTE (Array).
 
-⚠️ RÈGLE DE SYNTAXE : N'utilise JAMAIS de guillemets doubles (") dans tes textes. Utilise des guillemets simples ('). Utilise la balise <br> pour sauter des lignes.
-
-MISSION 2 (QCM UNIQUEMENT) :
-Génère EXACTEMENT {nombre_qcm} questions complexes basées sur le texte fourni, en balayant tout le document.
-Pour l'explication, liste chaque proposition avec VRAI ou FAUX en gras, suivi de la justification.
+MISSION 2 : Génère EXACTEMENT {nombre_qcm} questions complexes. Pour l'explication, liste chaque proposition avec VRAI ou FAUX.
 
 FORMAT JSON STRICT :
 {{
@@ -119,7 +121,10 @@ FORMAT JSON STRICT :
       "type_question": "Conceptuelle", "question": "...",
       "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
       "reponses_correctes": ["A", "C"],
-      "explication": "**A) VRAI** : explication...<br>**B) FAUX** : explication...<br>**C) VRAI** : explication...",
+      "explication": [
+        "**A) VRAI** : explication...",
+        "**B) FAUX** : explication..."
+      ],
       "source_cours": "Source...", "indice": "Indice...", "mnemotechnique": "Astuce..."
     }}
   ]
@@ -128,26 +133,24 @@ FORMAT JSON STRICT :
 
 def generer_cours_complet(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen):
     notes = texte_word if texte_word else 'Aucune note.'
-    style = 'Style ANNALES (Très Difficile, QCM à choix multiples, prop E).' if est_mode_examen else 'Style APPRENTISSAGE.'
+    style = 'Style ANNALES (Très Difficile, prop E).' if est_mode_examen else 'Style APPRENTISSAGE.'
     contenu_requete = f'TEXTE À ANALYSER :\n{texte_pdf}'
     
-    # LE MOTEUR A ÉTÉ CORRIGÉ ICI (Version 2.5 Flash)
     model = genai.GenerativeModel('gemini-2.5-flash')
     config = {'response_mime_type': 'application/json', 'temperature': 0.4, 'max_output_tokens': 8192}
 
-    # APPEL 1 : On génère le cours et les concepts
+    # APPEL 1 : Cours & Concepts
     prompt_c = PROMPT_COURS.format(matiere=matiere, notes_etudiant=notes)
     rep_cours = model.generate_content([prompt_c, contenu_requete], generation_config=config)
     json_cours = json.loads(nettoyer_json(rep_cours.text), strict=False)
 
-    # APPEL 2 : On génère les QCM (Le compteur de tokens repart à zéro !)
+    # APPEL 2 : QCM
     prompt_q = PROMPT_QCM.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, style_question=style)
     rep_qcm = model.generate_content([prompt_q, contenu_requete], generation_config=config)
     json_qcm = json.loads(nettoyer_json(rep_qcm.text), strict=False)
 
-    # On fusionne les deux résultats en un seul dictionnaire propre
     donnees_finales = {
-        "fiche_synthese": json_cours.get("fiche_synthese", "Erreur de synthèse."),
+        "fiche_synthese": json_cours.get("fiche_synthese", []),
         "concepts_cles": json_cours.get("concepts_cles", []),
         "qcm": json_qcm.get("qcm", [])
     }
@@ -189,12 +192,10 @@ if f_pdf:
             texte_cours = extraire_texte_pdf(f_pdf, p_deb, p_fin)
             t_word = lire_word(f_word) if f_word else ""
             
-            # Barre de progression pour rassurer pendant les deux appels
-            progress_text = "Opération 1/2 : Extraction exhaustive des Concepts..."
+            progress_text = "Opération 1/2 : Extraction exhaustive de la Synthèse et des Concepts..."
             bar = st.progress(0, text=progress_text)
             
             try:
-                # Execution du moteur bi-turbo
                 donnees_fusionnees = generer_cours_complet(texte_cours, t_word, matiere, difficulte, nombre_qcm, mode_examen)
                 bar.progress(100, text="Opération 2/2 : Génération des QCM terminée ! ✅")
                 
@@ -203,7 +204,7 @@ if f_pdf:
                 st.rerun()
 
             except json.JSONDecodeError as json_err:
-                st.error(f"⚠️ Erreur critique : Le fichier source est corrompu ({json_err}). Essayez de réduire le nombre de pages.")
+                st.error(f"⚠️ Erreur critique du fichier source ({json_err}). Essayez de réduire un peu le nombre de pages.")
             except Exception as e: 
                 st.error(f"Erreur technique de l'application : {e}")
 
@@ -218,7 +219,8 @@ if 'data' in st.session_state:
     t1, t2, t3, t4, t5 = st.tabs(["📖 Fiche", "🎯 Concepts Clés", "✍️ QCM", "🗂️ Anki", "📓 Cahier d'Erreurs"])
 
     with t1: 
-        st.markdown(f"<div class='synth-box'><h3>📌 Synthèse</h3>{data.get('fiche_synthese', '')}</div>", unsafe_allow_html=True)
+        texte_synthese_propre = assembler_texte(data.get('fiche_synthese', ''))
+        st.markdown(f"<div class='synth-box'><h3>📌 Synthèse</h3>{texte_synthese_propre}</div>", unsafe_allow_html=True)
 
     with t2:
         st.subheader(f"🎯 Les {len(liste_concepts)} Concepts Clés de ce cours")
@@ -266,7 +268,7 @@ if 'data' in st.session_state:
                     if st.button(f"Vérifier Q{i+1}", key=f"v_{i}"):
                         bonnes = sorted([str(b).strip() for b in q.get('reponses_correctes', [])])
                         mes_choix = sorted(cochees)
-                        texte_explication = q.get('explication', '')
+                        texte_explication = assembler_texte(q.get('explication', ''))
                         
                         if mes_choix == bonnes and len(bonnes) > 0: st.success("Vrai !")
                         else:
@@ -285,7 +287,7 @@ if 'data' in st.session_state:
             for i, q in enumerate(liste_qcm):
                 bonnes = sorted([str(b).strip() for b in q.get('reponses_correctes', [])])
                 mes_choix = sorted(st.session_state.get(f"choix_{i}", []))
-                texte_explication = q.get('explication', '')
+                texte_explication = assembler_texte(q.get('explication', ''))
                 juste = (mes_choix == bonnes and len(bonnes) > 0)
                 
                 if juste: score += 1
@@ -302,7 +304,8 @@ if 'data' in st.session_state:
 
     with t4:
         try:
-            anki_df = pd.DataFrame({"Q": [q.get('question', '') for q in liste_qcm], "R": [f"{q.get('reponses_correctes', '')} | {q.get('explication', '').replace('<br>', ' ')}" for q in liste_qcm]})
+            # Remplacement strict des sauts de lignes pour ne pas corrompre le fichier Anki (CSV)
+            anki_df = pd.DataFrame({"Q": [q.get('question', '') for q in liste_qcm], "R": [f"{q.get('reponses_correctes', '')} | {assembler_texte(q.get('explication', '')).replace(chr(10), ' ')}" for q in liste_qcm]})
             st.download_button("📥 Anki CSV", anki_df.to_csv(index=False, sep=";").encode('utf-8'), "anki.csv")
         except: st.error("Export indisponible")
 
@@ -315,8 +318,7 @@ if 'data' in st.session_state:
             for mat, errs in mem.items():
                 texte_word += f"--- MATIÈRE : {mat} ---\n"
                 for e in errs:
-                    explication_propre = str(e['explication']).replace('<br>', '\n')
-                    texte_word += f"Date: {e['date']}\nQ: {e['question']}\nMon erreur: {e['choix_user']}\nBonne rep: {e['bonnes_rep']}\nExplication:\n{explication_propre}\n\n"
+                    texte_word += f"Date: {e['date']}\nQ: {e['question']}\nMon erreur: {e['choix_user']}\nBonne rep: {e['bonnes_rep']}\nExplication:\n{e['explication']}\n\n"
             
             st.download_button("📝 Télécharger pour coller dans Word", texte_word, "mes_erreurs.txt")
             
