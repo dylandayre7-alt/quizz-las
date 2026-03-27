@@ -5,6 +5,7 @@ import json
 import pandas as pd
 import docx
 import os
+import math
 from datetime import datetime
 
 # ==============================================================================
@@ -24,25 +25,10 @@ st.markdown("""
     .correct-box { background-color: #155724; padding: 15px; border-radius: 10px; margin-bottom: 10px; color: #d4edda; border: 1px solid #c3e6cb;}
     .error-box { background-color: #4a1317; padding: 15px; border-radius: 10px; margin-bottom: 10px; color: #f8d7da; border: 1px solid #f5c6cb;}
     
-    .erreur-log { 
-        border-left: 4px solid #ff4b4b; 
-        padding: 15px; 
-        margin-bottom: 15px; 
-        background-color: #2b2b2b;
-        color: #ffffff;
-        border-radius: 5px; 
-        border: 1px solid #444; 
-    }
+    .erreur-log { border-left: 4px solid #ff4b4b; padding: 15px; margin-bottom: 15px; background-color: #2b2b2b; color: #ffffff; border-radius: 5px; border: 1px solid #444; }
     .erreur-log strong { color: #ffffff; }
     
-    .concept-card {
-        background-color: #f8f9fa;
-        padding: 15px;
-        border-radius: 8px;
-        border-left: 5px solid #007bff;
-        margin-bottom: 10px;
-        color: #333;
-    }
+    .concept-card { background-color: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 5px solid #007bff; margin-bottom: 10px; color: #333; }
     .concept-card strong { color: #007bff; }
 </style>
 """, unsafe_allow_html=True)
@@ -56,61 +42,45 @@ if 'cahier_memoire' not in st.session_state:
 def ajouter_erreur_session(matiere, question, choix_user, bonnes_rep, explication):
     if matiere not in st.session_state['cahier_memoire']:
         st.session_state['cahier_memoire'][matiere] = []
-    
     for err in st.session_state['cahier_memoire'][matiere]:
         if err['question'] == question: return
-
     st.session_state['cahier_memoire'][matiere].append({
-        "date": datetime.now().strftime("%d/%m/%Y"),
-        "question": question,
-        "choix_user": choix_user,
-        "bonnes_rep": bonnes_rep,
-        "explication": explication
+        "date": datetime.now().strftime("%d/%m/%Y"), "question": question,
+        "choix_user": choix_user, "bonnes_rep": bonnes_rep, "explication": explication
     })
 
 # ==============================================================================
-# 3. Moteur IA (Ajout des Concepts Clés)
+# 3. Moteur IA (Adapté pour le scan par petits blocs)
 # ==============================================================================
 SYSTEM_PROMPT = """
-Tu es un Professeur d'Université expert en LAS 1. 
-Matière : {matiere} | Difficulté : {difficulte}/10 | Nombre : {nombre_qcm}
+Tu es un Professeur expert en LAS 1. 
+Matière : {matiere} | Difficulté : {difficulte}/10
 
 STYLE : {style_question}
-MIXAGE : Base-toi 50% sur le texte du COURS OFFICIEL fourni et 50% sur les notes de l'étudiant : "{notes_etudiant}"
+NOTES DE L'ÉTUDIANT : "{notes_etudiant}"
 
-⚠️ RÈGLE DE SYNTAXE ABSOLUE : Tu ne dois JAMAIS utiliser de guillemets doubles (") à l'intérieur de tes phrases de texte. Utilise EXCLUSIVEMENT des guillemets simples (').
+⚠️ RÈGLE DE SYNTAXE : N'utilise JAMAIS de guillemets doubles (") dans tes textes. Utilise des guillemets simples (').
 
-⚠️ RÈGLES PÉDAGOGIQUES (TRÈS IMPORTANT) :
-1. RÉPARTITION EXTRÊME : Balaye l'ENSEMBLE du document. Alterne les pièges.
-2. SYNTHÈSE : Rédige une fiche de synthèse extrêmement détaillée.
-3. CONCEPTS CLÉS : Identifie les "bidules" importants du cours (structures, molécules, mécanismes, lois, etc.). Pour chacun, explique brièvement et simplement : son Rôle, son Objectif, Avec quoi il interagit, et Comment il fonctionne.
-4. QCM : Génère EXACTEMENT {nombre_qcm} questions.
-5. CORRECTION DÉTAILLÉE : L'explication doit reprendre CHAQUE proposition (A, B, C, D, E) sous forme de liste. Indique VRAI ou FAUX pour chaque lettre et justifie.
-6. "indice" : Fournis un indice subtil.
-7. "mnemotechnique" : Invente une astuce mentale.
+⚠️ MISSION SUR CET EXTRAIT DE COURS PRÉCIS :
+1. SYNTHÈSE : Fais un résumé structuré de cet extrait.
+2. CONCEPTS CLÉS (EXHAUSTIF) : Liste absolument TOUS les concepts, molécules, structures ou lois présents dans ce texte. Ne rate rien ! Sois concis : 1 phrase par critère.
+3. QCM : Génère EXACTEMENT {nombre_qcm} questions sur cet extrait.
 
 FORMAT JSON STRICT :
 {{
-  "fiche_synthese": "Ton résumé de cours complet...",
+  "fiche_synthese": "Résumé du bloc...",
   "concepts_cles": [
     {{
-      "nom": "Nom du concept (ex: La Coiffe en 5')",
-      "role": "Description brève de son rôle principal...",
-      "objectif": "Quel est son but final ?...",
-      "avec_quoi": "Avec quelles autres molécules/structures il interagit ?...",
-      "comment": "Comment ça marche concrètement ?..."
+      "nom": "Nom...", "role": "Rôle...", "objectif": "But...", "avec_quoi": "Interactions...", "comment": "Fonctionnement..."
     }}
   ],
   "qcm": [
     {{
-      "type_question": "Conceptuelle" ou "Calcul",
-      "question": "...",
+      "type_question": "Conceptuelle", "question": "...",
       "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
       "reponses_correctes": ["A", "C"],
-      "explication": "- **A) VRAI** : explication...\\n- **B) FAUX** : explication du piège...\\n- **C) VRAI** : explication...\\n- **D) FAUX** : explication...\\n- **E) FAUX** : explication...",
-      "source_cours": "Source...",
-      "indice": "Indice...",
-      "mnemotechnique": "Astuce..."
+      "explication": "- **A) VRAI** : ...\\n- **B) FAUX** : ...",
+      "source_cours": "Source...", "indice": "Indice...", "mnemotechnique": "Astuce..."
     }}
   ]
 }}
@@ -130,25 +100,17 @@ def lire_word(buffer_fichier):
     doc = docx.Document(buffer_fichier)
     return "\n".join([para.text for para in doc.paragraphs])
 
-def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen):
+def generer_donnees_bloc(texte_bloc, texte_word, matiere, difficulte, qcm_pour_ce_bloc, est_mode_examen):
     notes = texte_word if texte_word else 'Aucune note.'
-    style = 'Style ANNALES (Très Difficile, QCM à choix multiples, proposition E Aucune n est exacte).' if est_mode_examen else 'Style APPRENTISSAGE (Direct, clair, questions à choix multiples).'
+    style = 'Style ANNALES (Très Difficile, QCM à choix multiples, prop E).' if est_mode_examen else 'Style APPRENTISSAGE.'
     
-    prompt_final = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, notes_etudiant=notes, style_question=style)
-    contenu_requete = f'TEXTE DU COURS OFFICIEL À ANALYSER :\n{texte_pdf}'
+    prompt_final = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=qcm_pour_ce_bloc, notes_etudiant=notes, style_question=style)
+    contenu_requete = f'TEXTE À ANALYSER :\n{texte_bloc}'
     
     model = genai.GenerativeModel('gemini-2.5-flash')
+    reponse = model.generate_content([prompt_final, contenu_requete], generation_config={'response_mime_type': 'application/json', 'temperature': 0.3})
     
-    reponse = model.generate_content(
-        [prompt_final, contenu_requete], 
-        generation_config={'response_mime_type': 'application/json', 'temperature': 0.4}
-    )
-    
-    texte_brut = reponse.text.strip()
-    texte_brut = texte_brut.replace('```json', '')
-    texte_brut = texte_brut.replace('```', '')
-    texte_brut = texte_brut.strip()
-    
+    texte_brut = reponse.text.strip().replace('```json', '').replace('```', '').strip()
     return json.loads(texte_brut)
 
 # ==============================================================================
@@ -161,11 +123,11 @@ with st.sidebar:
     st.divider()
     matiere = st.selectbox("Matière :", ["Biologie / Biochimie", "Épidémiologie / Biostats", "Anatomie", "Pharmacologie", "Droit Médical"])
     difficulte = st.slider("Difficulté :", 1, 10, 8)
-    nombre_qcm = st.number_input("Nombre de questions :", 1, 30, 5)
+    nombre_qcm = st.number_input("Nombre de questions TOTAL :", 1, 50, 10)
     mode_examen = st.toggle("🚨 Activer le Mode Examen")
 
 # ==============================================================================
-# 5. Application Principale
+# 5. Application Principale (Le Scanner Intégral)
 # ==============================================================================
 st.title("🎓 Simulateur LAS 1")
 
@@ -180,23 +142,60 @@ if f_pdf:
     
     p_deb, p_fin = st.slider("Pages à analyser :", 1, p_tot, (1, p_tot))
     
-    if st.button("🧠 Lancer la génération", type="primary", use_container_width=True):
-        if not api_key: st.error("Clé API manquante !")
+    if st.button("🧠 Lancer le Scan Intégral", type="primary", use_container_width=True):
+        if not api_key: 
+            st.error("Clé API manquante !")
         else:
-            with st.spinner(f"Lecture et création de pièges variés sur {p_fin - p_deb + 1} pages..."):
-                try:
-                    texte_cours = extraire_texte_pdf(f_pdf, p_deb, p_fin)
-                    t_word = lire_word(f_word) if f_word else ""
+            # --- LOGIQUE DE DÉCOUPAGE ---
+            taille_bloc = 8 # On coupe le PDF toutes les 8 pages pour ne pas étouffer l'IA
+            pages_total = p_fin - p_deb + 1
+            nb_blocs = math.ceil(pages_total / taille_bloc)
+            qcm_par_bloc = max(1, nombre_qcm // nb_blocs)
+            
+            master_qcm = []
+            master_concepts = []
+            master_synthese = ""
+            
+            barre_progression = st.progress(0)
+            texte_statut = st.empty()
+            
+            t_word = lire_word(f_word) if f_word else ""
+            
+            try:
+                # On boucle sur chaque bloc de pages
+                for index, debut_bloc in enumerate(range(p_deb, p_fin + 1, taille_bloc)):
+                    fin_bloc = min(debut_bloc + taille_bloc - 1, p_fin)
+                    texte_statut.info(f"🔍 Aspiration des concepts des pages {debut_bloc} à {fin_bloc} (Étape {index+1}/{nb_blocs}). Veuillez patienter...")
                     
-                    st.session_state['data'] = generer_donnees(texte_cours, t_word, matiere, difficulte, nombre_qcm, mode_examen)
-                    st.session_state['examen_soumis'] = False
-                except json.JSONDecodeError as e:
-                    st.error("⚠️ L'IA a fait une erreur de mise en forme. Clique à nouveau sur 'Lancer la génération' !")
-                except Exception as e: 
-                    st.error(f"Erreur technique : {e}")
+                    texte_cours = extraire_texte_pdf(f_pdf, debut_bloc, fin_bloc)
+                    
+                    data_bloc = generer_donnees_bloc(texte_cours, t_word, matiere, difficulte, qcm_par_bloc, mode_examen)
+                    
+                    master_qcm.extend(data_bloc.get('qcm', []))
+                    master_concepts.extend(data_bloc.get('concepts_cles', []))
+                    
+                    master_synthese += f"### 📄 Partie (Pages {debut_bloc} à {fin_bloc})\n"
+                    master_synthese += data_bloc.get('fiche_synthese', '') + "\n\n---\n\n"
+                    
+                    barre_progression.progress((index + 1) / nb_blocs)
+                
+                texte_statut.success("✅ Extraction totale terminée !")
+                
+                # Sauvegarde globale
+                st.session_state['data'] = {
+                    "fiche_synthese": master_synthese,
+                    "concepts_cles": master_concepts,
+                    "qcm": master_qcm
+                }
+                st.session_state['examen_soumis'] = False
+                
+            except json.JSONDecodeError as e:
+                st.error("⚠️ L'IA a fait une erreur de ponctuation sur un des blocs. Relance le scan !")
+            except Exception as e: 
+                st.error(f"Erreur technique : {e}")
 
 # ==============================================================================
-# 6. Affichage Sécurisé
+# 6. Affichage
 # ==============================================================================
 if 'data' in st.session_state:
     data = st.session_state['data']
@@ -206,12 +205,12 @@ if 'data' in st.session_state:
     t1, t2, t3, t4, t5 = st.tabs(["📖 Fiche", "🎯 Concepts Clés", "✍️ QCM", "🗂️ Anki", "📓 Cahier d'Erreurs"])
 
     with t1: 
-        st.markdown(f"<div class='synth-box'><h3>📌 Synthèse</h3>{data.get('fiche_synthese', '')}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='synth-box'><h3>📌 Synthèse Complète</h3>{data.get('fiche_synthese', '')}</div>", unsafe_allow_html=True)
 
     with t2:
-        st.subheader("🎯 À quoi servent les éléments du cours ?")
+        st.subheader(f"🎯 Les {len(liste_concepts)} Concepts Clés de ce cours")
         if not liste_concepts:
-            st.info("Aucun concept clé spécifique n'a été détecté pour cette session.")
+            st.info("Aucun concept clé n'a été détecté.")
         else:
             for concept in liste_concepts:
                 with st.expander(f"🧩 {concept.get('nom', 'Concept inconnu')}", expanded=False):
@@ -226,7 +225,7 @@ if 'data' in st.session_state:
 
     with t3:
         if not liste_qcm or len(liste_qcm) == 0:
-            st.error("⚠️ Oups, une erreur s'est produite lors de la génération. Clique sur 'Lancer la génération' à nouveau.")
+            st.warning("Génération des QCM en cours ou échouée, relance stp.")
         
         elif not st.session_state.get('examen_soumis'):
             if mode_examen: st.warning("🚨 **MODE EXAMEN ACTIF** : Coche tes réponses, puis valide ta copie tout en bas.")
@@ -246,12 +245,10 @@ if 'data' in st.session_state:
                     col_aide1, col_aide2 = st.columns(2)
                     with col_aide1:
                         with st.expander("💡 Besoin d'un indice ?"):
-                            texte_indice = q.get('indice', 'Pas d indice disponible.')
-                            st.write(f"*{texte_indice}*")
+                            st.write(f"*{q.get('indice', 'Pas d indice')}*")
                     with col_aide2:
                         with st.expander("🧠 Astuce Mnémotechnique"):
-                            texte_astuce = q.get('mnemotechnique', 'Pas d astuce disponible.')
-                            st.info(texte_astuce)
+                            st.info(q.get('mnemotechnique', 'Pas d astuce'))
 
                     if st.button(f"Vérifier Q{i+1}", key=f"v_{i}"):
                         bonnes = sorted([str(b).strip() for b in q.get('reponses_correctes', [])])
@@ -260,8 +257,7 @@ if 'data' in st.session_state:
                         else:
                             st.error(f"Faux ! Rep: {', '.join(bonnes)}")
                             ajouter_erreur_session(matiere, q.get('question', ''), ", ".join(mes_choix) if mes_choix else "Aucune", ", ".join(bonnes), q.get('explication', ''))
-                        
-                        st.success("**Correction détaillée :**")
+                        st.success("**Correction :**")
                         st.markdown(q.get('explication', ''))
                 st.divider()
             
@@ -284,7 +280,7 @@ if 'data' in st.session_state:
                     st.markdown(q.get('explication', ''))
                     st.info(f"**💡 Astuce pour la prochaine fois :** {q.get('mnemotechnique', '')}")
 
-            st.metric("Note", f"{(score/len(liste_qcm))*20:.1f} / 20")
+            st.metric("Note Finale", f"{(score/len(liste_qcm))*20:.1f} / 20")
             if st.button("Recommencer un nouveau test"): st.session_state['examen_soumis'] = False; st.rerun()
 
     with t4:
