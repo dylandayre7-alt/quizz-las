@@ -131,7 +131,8 @@ def generer_cours_complet(texte_pdf, texte_word, matiere, difficulte, nombre_qcm
     style = 'Style ANNALES (Très Difficile, QCM à choix multiples, prop E).' if est_mode_examen else 'Style APPRENTISSAGE.'
     contenu_requete = f'TEXTE À ANALYSER :\n{texte_pdf}'
     
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    # LE MOTEUR A ÉTÉ CORRIGÉ ICI (Version 2.5 Flash)
+    model = genai.GenerativeModel('gemini-2.5-flash')
     config = {'response_mime_type': 'application/json', 'temperature': 0.4, 'max_output_tokens': 8192}
 
     # APPEL 1 : On génère le cours et les concepts
