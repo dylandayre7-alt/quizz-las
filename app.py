@@ -5,7 +5,6 @@ import json
 import pandas as pd
 import docx
 import os
-import math
 from datetime import datetime
 
 # ==============================================================================
@@ -50,25 +49,26 @@ def ajouter_erreur_session(matiere, question, choix_user, bonnes_rep, explicatio
     })
 
 # ==============================================================================
-# 3. Moteur IA (Adapté pour le scan par petits blocs)
+# 3. Moteur IA (Consigne "Concepts" poussée au maximum)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en LAS 1. 
-Matière : {matiere} | Difficulté : {difficulte}/10
+Matière : {matiere} | Difficulté : {difficulte}/10 | Nombre total de QCM : {nombre_qcm}
 
 STYLE : {style_question}
 NOTES DE L'ÉTUDIANT : "{notes_etudiant}"
 
-⚠️ RÈGLE DE SYNTAXE : N'utilise JAMAIS de guillemets doubles (") dans tes textes. Utilise des guillemets simples (').
+⚠️ RÈGLE DE SYNTAXE ABSOLUE : N'utilise JAMAIS de guillemets doubles (") dans tes textes. Utilise EXCLUSIVEMENT des guillemets simples (').
 
-⚠️ MISSION SUR CET EXTRAIT DE COURS PRÉCIS :
-1. SYNTHÈSE : Fais un résumé structuré de cet extrait.
-2. CONCEPTS CLÉS (EXHAUSTIF) : Liste absolument TOUS les concepts, molécules, structures ou lois présents dans ce texte. Ne rate rien ! Sois concis : 1 phrase par critère.
-3. QCM : Génère EXACTEMENT {nombre_qcm} questions sur cet extrait.
+⚠️ MISSION GLOBALE SUR TOUT LE DOCUMENT :
+1. SYNTHÈSE : Fais un résumé global, structuré et détaillé.
+2. CONCEPTS CLÉS (EXHAUSTIVITÉ TOTALE) : Ton objectif principal est la QUANTITÉ. Extrais LE PLUS GRAND NOMBRE POSSIBLE de concepts, molécules, structures, ou lois de ce cours. Vise OBLIGATOIREMENT entre 20 et 40 concepts minimum ! Pour pouvoir en lister autant d'un coup, sois chirurgical : donne juste 1 petite phrase pour son Rôle, 1 pour son Objectif, 1 pour ses Interactions (Avec quoi), et 1 pour son Fonctionnement (Comment). Ne rate aucun élément clé de ton document.
+3. QCM : Génère EXACTEMENT {nombre_qcm} questions en balayant bien le début, le milieu et la fin du document.
+4. CORRECTION DÉTAILLÉE : Sous forme de liste pour chaque proposition (A, B, C, D, E) avec VRAI ou FAUX en gras.
 
 FORMAT JSON STRICT :
 {{
-  "fiche_synthese": "Résumé du bloc...",
+  "fiche_synthese": "Résumé...",
   "concepts_cles": [
     {{
       "nom": "Nom...", "role": "Rôle...", "objectif": "But...", "avec_quoi": "Interactions...", "comment": "Fonctionnement..."
@@ -100,15 +100,24 @@ def lire_word(buffer_fichier):
     doc = docx.Document(buffer_fichier)
     return "\n".join([para.text for para in doc.paragraphs])
 
-def generer_donnees_bloc(texte_bloc, texte_word, matiere, difficulte, qcm_pour_ce_bloc, est_mode_examen):
+def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen):
     notes = texte_word if texte_word else 'Aucune note.'
     style = 'Style ANNALES (Très Difficile, QCM à choix multiples, prop E).' if est_mode_examen else 'Style APPRENTISSAGE.'
     
-    prompt_final = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=qcm_pour_ce_bloc, notes_etudiant=notes, style_question=style)
-    contenu_requete = f'TEXTE À ANALYSER :\n{texte_bloc}'
+    prompt_final = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, notes_etudiant=notes, style_question=style)
+    contenu_requete = f'TEXTE À ANALYSER :\n{texte_pdf}'
     
     model = genai.GenerativeModel('gemini-2.5-flash')
-    reponse = model.generate_content([prompt_final, contenu_requete], generation_config={'response_mime_type': 'application/json', 'temperature': 0.3})
+    
+    # max_output_tokens très élevé pour autoriser l'IA à écrire une très longue liste de concepts sans s'arrêter
+    reponse = model.generate_content(
+        [prompt_final, contenu_requete], 
+        generation_config={
+            'response_mime_type': 'application/json', 
+            'temperature': 0.4,
+            'max_output_tokens': 8192 
+        }
+    )
     
     texte_brut = reponse.text.strip().replace('```json', '').replace('```', '').strip()
     return json.loads(texte_brut)
@@ -123,11 +132,11 @@ with st.sidebar:
     st.divider()
     matiere = st.selectbox("Matière :", ["Biologie / Biochimie", "Épidémiologie / Biostats", "Anatomie", "Pharmacologie", "Droit Médical"])
     difficulte = st.slider("Difficulté :", 1, 10, 8)
-    nombre_qcm = st.number_input("Nombre de questions TOTAL :", 1, 50, 10)
+    nombre_qcm = st.number_input("Nombre de questions :", 1, 30, 10)
     mode_examen = st.toggle("🚨 Activer le Mode Examen")
 
 # ==============================================================================
-# 5. Application Principale (Le Scanner Intégral)
+# 5. Application Principale
 # ==============================================================================
 st.title("🎓 Simulateur LAS 1")
 
@@ -142,57 +151,21 @@ if f_pdf:
     
     p_deb, p_fin = st.slider("Pages à analyser :", 1, p_tot, (1, p_tot))
     
-    if st.button("🧠 Lancer le Scan Intégral", type="primary", use_container_width=True):
+    if st.button("🚀 Lancer la génération", type="primary", use_container_width=True):
         if not api_key: 
             st.error("Clé API manquante !")
         else:
-            # --- LOGIQUE DE DÉCOUPAGE ---
-            taille_bloc = 8 # On coupe le PDF toutes les 8 pages pour ne pas étouffer l'IA
-            pages_total = p_fin - p_deb + 1
-            nb_blocs = math.ceil(pages_total / taille_bloc)
-            qcm_par_bloc = max(1, nombre_qcm // nb_blocs)
-            
-            master_qcm = []
-            master_concepts = []
-            master_synthese = ""
-            
-            barre_progression = st.progress(0)
-            texte_statut = st.empty()
-            
-            t_word = lire_word(f_word) if f_word else ""
-            
-            try:
-                # On boucle sur chaque bloc de pages
-                for index, debut_bloc in enumerate(range(p_deb, p_fin + 1, taille_bloc)):
-                    fin_bloc = min(debut_bloc + taille_bloc - 1, p_fin)
-                    texte_statut.info(f"🔍 Aspiration des concepts des pages {debut_bloc} à {fin_bloc} (Étape {index+1}/{nb_blocs}). Veuillez patienter...")
+            with st.spinner(f"L'IA extrait massivement les concepts et QCM de tes {p_fin - p_deb + 1} pages..."):
+                try:
+                    texte_cours = extraire_texte_pdf(f_pdf, p_deb, p_fin)
+                    t_word = lire_word(f_word) if f_word else ""
                     
-                    texte_cours = extraire_texte_pdf(f_pdf, debut_bloc, fin_bloc)
-                    
-                    data_bloc = generer_donnees_bloc(texte_cours, t_word, matiere, difficulte, qcm_par_bloc, mode_examen)
-                    
-                    master_qcm.extend(data_bloc.get('qcm', []))
-                    master_concepts.extend(data_bloc.get('concepts_cles', []))
-                    
-                    master_synthese += f"### 📄 Partie (Pages {debut_bloc} à {fin_bloc})\n"
-                    master_synthese += data_bloc.get('fiche_synthese', '') + "\n\n---\n\n"
-                    
-                    barre_progression.progress((index + 1) / nb_blocs)
-                
-                texte_statut.success("✅ Extraction totale terminée !")
-                
-                # Sauvegarde globale
-                st.session_state['data'] = {
-                    "fiche_synthese": master_synthese,
-                    "concepts_cles": master_concepts,
-                    "qcm": master_qcm
-                }
-                st.session_state['examen_soumis'] = False
-                
-            except json.JSONDecodeError as e:
-                st.error("⚠️ L'IA a fait une erreur de ponctuation sur un des blocs. Relance le scan !")
-            except Exception as e: 
-                st.error(f"Erreur technique : {e}")
+                    st.session_state['data'] = generer_donnees(texte_cours, t_word, matiere, difficulte, nombre_qcm, mode_examen)
+                    st.session_state['examen_soumis'] = False
+                except json.JSONDecodeError as e:
+                    st.error("⚠️ L'IA a fait une erreur de mise en forme. Relance !")
+                except Exception as e: 
+                    st.error(f"Erreur technique : {e}")
 
 # ==============================================================================
 # 6. Affichage
@@ -205,7 +178,7 @@ if 'data' in st.session_state:
     t1, t2, t3, t4, t5 = st.tabs(["📖 Fiche", "🎯 Concepts Clés", "✍️ QCM", "🗂️ Anki", "📓 Cahier d'Erreurs"])
 
     with t1: 
-        st.markdown(f"<div class='synth-box'><h3>📌 Synthèse Complète</h3>{data.get('fiche_synthese', '')}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='synth-box'><h3>📌 Synthèse</h3>{data.get('fiche_synthese', '')}</div>", unsafe_allow_html=True)
 
     with t2:
         st.subheader(f"🎯 Les {len(liste_concepts)} Concepts Clés de ce cours")
@@ -225,7 +198,7 @@ if 'data' in st.session_state:
 
     with t3:
         if not liste_qcm or len(liste_qcm) == 0:
-            st.warning("Génération des QCM en cours ou échouée, relance stp.")
+            st.warning("Génération des QCM échouée, relance stp.")
         
         elif not st.session_state.get('examen_soumis'):
             if mode_examen: st.warning("🚨 **MODE EXAMEN ACTIF** : Coche tes réponses, puis valide ta copie tout en bas.")
