@@ -50,7 +50,7 @@ def ajouter_erreur_session(matiere, question, choix_user, bonnes_rep, explicatio
     })
 
 # ==============================================================================
-# 3. Moteur IA (Format Ultra Strict)
+# 3. Moteur IA (Tolérance Maximale)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en LAS 1. 
@@ -59,10 +59,9 @@ Matière : {matiere} | Difficulté : {difficulte}/10 | Nombre total de QCM : {no
 STYLE : {style_question}
 NOTES DE L'ÉTUDIANT : "{notes_etudiant}"
 
-⚠️ SÉCURITÉ INFORMATIQUE MAXIMALE (POUR ÉVITER LE CRASH DU SITE) :
-1. Ton format DOIT être un JSON absolument parfait.
-2. INTERDICTION FORMELLE D'UTILISER DES GUILLEMETS DOUBLES (") à l'intérieur de tes phrases. Utilise UNIQUEMENT des guillemets simples (') ou des chevrons (<< >>) pour citer.
-3. N'oublie aucune virgule entre les éléments des listes.
+⚠️ RÈGLE DE SYNTAXE ABSOLUE : 
+1. N'utilise JAMAIS de guillemets doubles (") dans tes textes. Utilise EXCLUSIVEMENT des guillemets simples (').
+2. NE FAIS JAMAIS DE VRAIS RETOURS À LA LIGNE (touche Entrée) dans tes textes JSON. Écris tout sur une seule ligne continue, ou utilise explicitement les caractères \\n pour sauter une ligne.
 
 ⚠️ MISSION GLOBALE SUR TOUT LE DOCUMENT :
 1. SYNTHÈSE : Fais un résumé global, structuré et détaillé.
@@ -122,13 +121,12 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
         }
     )
     
-    # Nettoyage propre sans utiliser le startswith qui buggait au copier/coller
     texte_brut = reponse.text.strip()
     texte_brut = re.sub(r'^```json\s*', '', texte_brut)
     texte_brut = re.sub(r'^```\s*', '', texte_brut)
     texte_brut = re.sub(r'\s*```$', '', texte_brut)
     
-    return texte_brut.strip() # On renvoie le texte brut, pas le dictionnaire converti
+    return texte_brut.strip() 
 
 # ==============================================================================
 # 4. Interface Sidebar
@@ -168,17 +166,15 @@ if f_pdf:
                     texte_cours = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                     t_word = lire_word(f_word) if f_word else ""
                     
-                    # On récupère d'abord le texte brut généré par l'IA
                     texte_brut_ia = generer_donnees(texte_cours, t_word, matiere, difficulte, nombre_qcm, mode_examen)
                     
-                    # On tente de le transformer en format "Application" (JSON)
                     try:
-                        st.session_state['data'] = json.loads(texte_brut_ia)
+                        # 🪄 LA MAGIE EST ICI : strict=False permet à Python de pardonner les sauts de ligne de l'IA !
+                        st.session_state['data'] = json.loads(texte_brut_ia, strict=False)
                         st.session_state['examen_soumis'] = False
                     except json.JSONDecodeError as json_err:
-                        # LE PARACHUTE : Si l'IA a fait une erreur de syntaxe, on affiche quand même son travail
-                        st.error(f"⚠️ L'IA a fait une faute de frappe informatique (Erreur : {json_err}). Le site n'a pas pu créer les boutons.")
-                        st.warning("👇 Mais ton temps n'est pas perdu ! Voici tout le travail qu'elle a généré en version texte brut :")
+                        st.error(f"⚠️ L'IA a fait une faute de frappe tenace (Erreur : {json_err}).")
+                        st.warning("👇 Voici tout le travail qu'elle a généré en version texte brut :")
                         with st.expander("Voir le contenu généré (à copier-coller dans un Word)"):
                             st.text(texte_brut_ia)
                             
