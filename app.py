@@ -34,6 +34,16 @@ st.markdown("""
         border: 1px solid #444; 
     }
     .erreur-log strong { color: #ffffff; }
+    
+    .concept-card {
+        background-color: #f8f9fa;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 5px solid #007bff;
+        margin-bottom: 10px;
+        color: #333;
+    }
+    .concept-card strong { color: #007bff; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -59,7 +69,7 @@ def ajouter_erreur_session(matiere, question, choix_user, bonnes_rep, explicatio
     })
 
 # ==============================================================================
-# 3. Moteur IA (Corrections Détaillées Améliorées)
+# 3. Moteur IA (Ajout des Concepts Clés)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur d'Université expert en LAS 1. 
@@ -71,16 +81,26 @@ MIXAGE : Base-toi 50% sur le texte du COURS OFFICIEL fourni et 50% sur les notes
 ⚠️ RÈGLE DE SYNTAXE ABSOLUE : Tu ne dois JAMAIS utiliser de guillemets doubles (") à l'intérieur de tes phrases de texte. Utilise EXCLUSIVEMENT des guillemets simples (').
 
 ⚠️ RÈGLES PÉDAGOGIQUES (TRÈS IMPORTANT) :
-1. RÉPARTITION EXTRÊME : Balaye l'ENSEMBLE du document. Alterne les pièges (Définitions, Mécanismes, Exceptions).
+1. RÉPARTITION EXTRÊME : Balaye l'ENSEMBLE du document. Alterne les pièges.
 2. SYNTHÈSE : Rédige une fiche de synthèse extrêmement détaillée.
-3. QCM : Génère EXACTEMENT {nombre_qcm} questions.
-4. CORRECTION DÉTAILLÉE : C'est vital ! L'explication doit reprendre CHAQUE proposition (A, B, C, D, E) sous forme de liste. Pour chaque lettre, indique en majuscule si c'est VRAI ou FAUX. Pour les propositions fausses, explique précisément où est le piège ou l'erreur.
-5. "indice" : Fournis un indice subtil.
-6. "mnemotechnique" : Invente une astuce mentale.
+3. CONCEPTS CLÉS : Identifie les "bidules" importants du cours (structures, molécules, mécanismes, lois, etc.). Pour chacun, explique brièvement et simplement : son Rôle, son Objectif, Avec quoi il interagit, et Comment il fonctionne.
+4. QCM : Génère EXACTEMENT {nombre_qcm} questions.
+5. CORRECTION DÉTAILLÉE : L'explication doit reprendre CHAQUE proposition (A, B, C, D, E) sous forme de liste. Indique VRAI ou FAUX pour chaque lettre et justifie.
+6. "indice" : Fournis un indice subtil.
+7. "mnemotechnique" : Invente une astuce mentale.
 
 FORMAT JSON STRICT :
 {{
   "fiche_synthese": "Ton résumé de cours complet...",
+  "concepts_cles": [
+    {{
+      "nom": "Nom du concept (ex: La Coiffe en 5')",
+      "role": "Description brève de son rôle principal...",
+      "objectif": "Quel est son but final ?...",
+      "avec_quoi": "Avec quelles autres molécules/structures il interagit ?...",
+      "comment": "Comment ça marche concrètement ?..."
+    }}
+  ],
   "qcm": [
     {{
       "type_question": "Conceptuelle" ou "Calcul",
@@ -181,13 +201,30 @@ if f_pdf:
 if 'data' in st.session_state:
     data = st.session_state['data']
     liste_qcm = data.get('qcm', [])
+    liste_concepts = data.get('concepts_cles', [])
     
-    t1, t2, t3, t4 = st.tabs(["📖 Fiche", "✍️ QCM", "🗂️ Anki", "📓 Cahier d'Erreurs"])
+    t1, t2, t3, t4, t5 = st.tabs(["📖 Fiche", "🎯 Concepts Clés", "✍️ QCM", "🗂️ Anki", "📓 Cahier d'Erreurs"])
 
     with t1: 
         st.markdown(f"<div class='synth-box'><h3>📌 Synthèse</h3>{data.get('fiche_synthese', '')}</div>", unsafe_allow_html=True)
 
     with t2:
+        st.subheader("🎯 À quoi servent les éléments du cours ?")
+        if not liste_concepts:
+            st.info("Aucun concept clé spécifique n'a été détecté pour cette session.")
+        else:
+            for concept in liste_concepts:
+                with st.expander(f"🧩 {concept.get('nom', 'Concept inconnu')}", expanded=False):
+                    st.markdown(f"""
+                    <div class='concept-card'>
+                        <strong>🛠️ Rôle :</strong> {concept.get('role', '')}<br><br>
+                        <strong>🎯 Objectif :</strong> {concept.get('objectif', '')}<br><br>
+                        <strong>🤝 Avec quoi :</strong> {concept.get('avec_quoi', '')}<br><br>
+                        <strong>⚙️ Comment :</strong> {concept.get('comment', '')}
+                    </div>
+                    """, unsafe_allow_html=True)
+
+    with t3:
         if not liste_qcm or len(liste_qcm) == 0:
             st.error("⚠️ Oups, une erreur s'est produite lors de la génération. Clique sur 'Lancer la génération' à nouveau.")
         
@@ -225,7 +262,6 @@ if 'data' in st.session_state:
                             ajouter_erreur_session(matiere, q.get('question', ''), ", ".join(mes_choix) if mes_choix else "Aucune", ", ".join(bonnes), q.get('explication', ''))
                         
                         st.success("**Correction détaillée :**")
-                        # Utilisation de st.markdown pour bien afficher la liste avec les retours à la ligne
                         st.markdown(q.get('explication', ''))
                 st.divider()
             
@@ -251,13 +287,13 @@ if 'data' in st.session_state:
             st.metric("Note", f"{(score/len(liste_qcm))*20:.1f} / 20")
             if st.button("Recommencer un nouveau test"): st.session_state['examen_soumis'] = False; st.rerun()
 
-    with t3:
+    with t4:
         try:
             anki_df = pd.DataFrame({"Q": [q.get('question', '') for q in liste_qcm], "R": [f"{q.get('reponses_correctes', '')} | {q.get('explication', '')}" for q in liste_qcm]})
             st.download_button("📥 Anki CSV", anki_df.to_csv(index=False, sep=";").encode('utf-8'), "anki.csv")
         except: st.error("Export indisponible")
 
-    with t4:
+    with t5:
         st.subheader("📓 Mon Cahier d'Erreurs de la Session")
         mem = st.session_state.get('cahier_memoire', {})
         if not mem: st.info("Aucune erreur enregistrée pour le moment.")
