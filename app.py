@@ -34,7 +34,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Gestion de la Mémoire Session & Utilitaires
+# 2. Utilitaires & Mémoire
 # ==============================================================================
 if 'cahier_memoire' not in st.session_state:
     st.session_state['cahier_memoire'] = {}
@@ -50,15 +50,14 @@ def ajouter_erreur_session(matiere, question, choix_user, bonnes_rep, explicatio
     })
 
 def nettoyer_json(texte):
-    texte_brut = texte.strip()
-    texte_brut = re.sub(r'^```[a-zA-Z]*\n', '', texte_brut)
-    texte_brut = re.sub(r'^```', '', texte_brut)
-    texte_brut = re.sub(r'\n```$', '', texte_brut)
-    texte_brut = re.sub(r'```$', '', texte_brut)
-    return texte_brut.strip()
+    t = texte.strip()
+    t = re.sub(r'^```[a-zA-Z]*\n', '', t)
+    t = re.sub(r'^```', '', t)
+    t = re.sub(r'\n```$', '', t)
+    t = re.sub(r'```$', '', t)
+    return t.strip()
 
 def assembler_texte(champ):
-    """Fonction vitale pour recoller les paragraphes que l'IA a mis dans des listes"""
     if isinstance(champ, list): 
         return '\n\n'.join([str(c) for c in champ])
     return str(champ)
@@ -78,20 +77,26 @@ def lire_word(buffer_fichier):
     return "\n".join([para.text for para in doc.paragraphs])
 
 # ==============================================================================
-# 3. Moteur IA (Architecture BI-TURBO + SÉCURITÉ EN LISTES)
+# 3. Moteur IA (Version Sécurisée Anti-Quota)
 # ==============================================================================
+PROMPT_UNIQUE = """
+Tu es un Professeur expert en LAS 1. 
+Matière : {matiere} | Difficulté : {difficulte}/10 | Nombre QCM : {nombre_qcm}
+STYLE : {style_question}
+NOTES DE L'ÉTUDIANT : "{notes_etudiant}"
 
-# --- MOTEUR 1 : LE COURS ---
-PROMPT_COURS = """
-Tu es un Professeur expert en LAS 1. Matière : {matiere}. NOTES DE L'ÉTUDIANT : "{notes_etudiant}"
+⚠️ RÈGLES INFORMATIQUES CRITIQUES (POUR NE PAS PLANTER) :
+1. N'utilise JAMAIS de guillemets doubles (") (utilise '). 
+2. NE FAIS AUCUN VRAI RETOUR À LA LIGNE DANS TON JSON.
+3. Pour les champs "fiche_synthese" et "explication", tu DOIS utiliser une LISTE (Array) de paragraphes.
 
-⚠️ RÈGLE INFORMATIQUE CRITIQUE : N'utilise JAMAIS de guillemets doubles (") dans tes textes (utilise '). NE FAIS JAMAIS DE RETOURS À LA LIGNE DANS LE JSON. Pour "fiche_synthese", tu DOIS fournir une LISTE (Array) où chaque élément est un paragraphe.
+MISSION (UNE SEULE PASSE) :
+1. SYNTHÈSE : Fais un résumé clair et structuré (sous forme de liste).
+2. CONCEPTS CLÉS : Liste les 10 à 15 concepts les plus importants. Ne dépasse pas 15 pour économiser la mémoire. (1 phrase par critère).
+3. QCM : Génère EXACTEMENT {nombre_qcm} questions complexes. 
+4. CORRECTION : Liste de justifications avec VRAI ou FAUX en gras.
 
-MISSION 1 :
-1. SYNTHÈSE : Fais un résumé global, structuré sous forme de liste de paragraphes.
-2. CONCEPTS CLÉS : Vise entre 20 et 50 concepts ! Reste très bref (1 phrase par clé).
-
-FORMAT JSON STRICT (Utilise bien les crochets [] pour la synthèse) :
+FORMAT JSON STRICT :
 {{
   "fiche_synthese": [
     "### Grand Titre",
@@ -102,20 +107,7 @@ FORMAT JSON STRICT (Utilise bien les crochets [] pour la synthèse) :
     {{
       "nom": "Nom...", "role": "Rôle...", "objectif": "But...", "avec_quoi": "Interactions...", "comment": "Fonctionnement..."
     }}
-  ]
-}}
-"""
-
-# --- MOTEUR 2 : L'ENTRAÎNEMENT ---
-PROMPT_QCM = """
-Tu es un Professeur expert en LAS 1. Matière : {matiere} | Difficulté : {difficulte}/10 | Nombre QCM : {nombre_qcm} | STYLE : {style_question}
-
-⚠️ RÈGLE INFORMATIQUE CRITIQUE : N'utilise JAMAIS de guillemets doubles (") dans tes textes (utilise '). NE FAIS JAMAIS DE RETOURS À LA LIGNE. L'explication DOIT être une LISTE (Array).
-
-MISSION 2 : Génère EXACTEMENT {nombre_qcm} questions complexes. Pour l'explication, liste chaque proposition avec VRAI ou FAUX.
-
-FORMAT JSON STRICT :
-{{
+  ],
   "qcm": [
     {{
       "type_question": "Conceptuelle", "question": "...",
@@ -131,30 +123,26 @@ FORMAT JSON STRICT :
 }}
 """
 
-def generer_cours_complet(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen):
+def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen):
     notes = texte_word if texte_word else 'Aucune note.'
     style = 'Style ANNALES (Très Difficile, prop E).' if est_mode_examen else 'Style APPRENTISSAGE.'
+    
+    prompt_final = PROMPT_UNIQUE.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, notes_etudiant=notes, style_question=style)
     contenu_requete = f'TEXTE À ANALYSER :\n{texte_pdf}'
     
-    model = genai.GenerativeModel('gemini-2.5-flash')
-    config = {'response_mime_type': 'application/json', 'temperature': 0.4, 'max_output_tokens': 8192}
-
-    # APPEL 1 : Cours & Concepts
-    prompt_c = PROMPT_COURS.format(matiere=matiere, notes_etudiant=notes)
-    rep_cours = model.generate_content([prompt_c, contenu_requete], generation_config=config)
-    json_cours = json.loads(nettoyer_json(rep_cours.text), strict=False)
-
-    # APPEL 2 : QCM
-    prompt_q = PROMPT_QCM.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, style_question=style)
-    rep_qcm = model.generate_content([prompt_q, contenu_requete], generation_config=config)
-    json_qcm = json.loads(nettoyer_json(rep_qcm.text), strict=False)
-
-    donnees_finales = {
-        "fiche_synthese": json_cours.get("fiche_synthese", []),
-        "concepts_cles": json_cours.get("concepts_cles", []),
-        "qcm": json_qcm.get("qcm", [])
-    }
-    return donnees_finales
+    # 🌟 CHANGEMENT MAJEUR ICI : gemini-2.0-flash a des quotas beaucoup plus élevés !
+    model = genai.GenerativeModel('gemini-2.0-flash')
+    
+    reponse = model.generate_content(
+        [prompt_final, contenu_requete], 
+        generation_config={
+            'response_mime_type': 'application/json', 
+            'temperature': 0.4,
+            'max_output_tokens': 8192 
+        }
+    )
+    
+    return nettoyer_json(reponse.text)
 
 # ==============================================================================
 # 4. Interface Sidebar
@@ -189,24 +177,25 @@ if f_pdf:
         if not api_key: 
             st.error("Clé API manquante !")
         else:
-            texte_cours = extraire_texte_pdf(f_pdf, p_deb, p_fin)
-            t_word = lire_word(f_word) if f_word else ""
-            
-            progress_text = "Opération 1/2 : Extraction exhaustive de la Synthèse et des Concepts..."
-            bar = st.progress(0, text=progress_text)
-            
-            try:
-                donnees_fusionnees = generer_cours_complet(texte_cours, t_word, matiere, difficulte, nombre_qcm, mode_examen)
-                bar.progress(100, text="Opération 2/2 : Génération des QCM terminée ! ✅")
-                
-                st.session_state['data'] = donnees_fusionnees
-                st.session_state['examen_soumis'] = False
-                st.rerun()
-
-            except json.JSONDecodeError as json_err:
-                st.error(f"⚠️ Erreur critique du fichier source ({json_err}). Essayez de réduire un peu le nombre de pages.")
-            except Exception as e: 
-                st.error(f"Erreur technique de l'application : {e}")
+            with st.spinner(f"Analyse en cours (Version Sécurisée Anti-Quota)..."):
+                try:
+                    texte_cours = extraire_texte_pdf(f_pdf, p_deb, p_fin)
+                    t_word = lire_word(f_word) if f_word else ""
+                    
+                    texte_brut_ia = generer_donnees(texte_cours, t_word, matiere, difficulte, nombre_qcm, mode_examen)
+                    
+                    try:
+                        st.session_state['data'] = json.loads(texte_brut_ia, strict=False)
+                        st.session_state['examen_soumis'] = False
+                        st.rerun()
+                    except json.JSONDecodeError as json_err:
+                        st.error(f"⚠️ Erreur de décodage ({json_err}).")
+                        st.warning("👇 Le fichier JSON a vacillé, mais voici tout le travail généré en version texte brut :")
+                        with st.expander("Voir le contenu généré (à copier-coller)"):
+                            st.text(texte_brut_ia)
+                            
+                except Exception as e: 
+                    st.error(f"Erreur d'API : {e}")
 
 # ==============================================================================
 # 6. Affichage Normal
@@ -304,7 +293,6 @@ if 'data' in st.session_state:
 
     with t4:
         try:
-            # Remplacement strict des sauts de lignes pour ne pas corrompre le fichier Anki (CSV)
             anki_df = pd.DataFrame({"Q": [q.get('question', '') for q in liste_qcm], "R": [f"{q.get('reponses_correctes', '')} | {assembler_texte(q.get('explication', '')).replace(chr(10), ' ')}" for q in liste_qcm]})
             st.download_button("📥 Anki CSV", anki_df.to_csv(index=False, sep=";").encode('utf-8'), "anki.csv")
         except: st.error("Export indisponible")
@@ -318,7 +306,8 @@ if 'data' in st.session_state:
             for mat, errs in mem.items():
                 texte_word += f"--- MATIÈRE : {mat} ---\n"
                 for e in errs:
-                    texte_word += f"Date: {e['date']}\nQ: {e['question']}\nMon erreur: {e['choix_user']}\nBonne rep: {e['bonnes_rep']}\nExplication:\n{e['explication']}\n\n"
+                    explication_propre = str(e['explication']).replace('\n', ' ')
+                    texte_word += f"Date: {e['date']}\nQ: {e['question']}\nMon erreur: {e['choix_user']}\nBonne rep: {e['bonnes_rep']}\nExplication:\n{explication_propre}\n\n"
             
             st.download_button("📝 Télécharger pour coller dans Word", texte_word, "mes_erreurs.txt")
             
