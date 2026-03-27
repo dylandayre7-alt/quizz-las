@@ -50,7 +50,7 @@ def ajouter_erreur_session(matiere, question, choix_user, bonnes_rep, explicatio
     })
 
 # ==============================================================================
-# 3. Moteur IA (Tolérance Maximale)
+# 3. Moteur IA (Version 1.5 Flash - Ultra Fiable)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en LAS 1. 
@@ -59,13 +59,11 @@ Matière : {matiere} | Difficulté : {difficulte}/10 | Nombre total de QCM : {no
 STYLE : {style_question}
 NOTES DE L'ÉTUDIANT : "{notes_etudiant}"
 
-⚠️ RÈGLE DE SYNTAXE ABSOLUE : 
-1. N'utilise JAMAIS de guillemets doubles (") dans tes textes. Utilise EXCLUSIVEMENT des guillemets simples (').
-2. NE FAIS JAMAIS DE VRAIS RETOURS À LA LIGNE (touche Entrée) dans tes textes JSON. Écris tout sur une seule ligne continue, ou utilise explicitement les caractères \\n pour sauter une ligne.
+⚠️ RÈGLE DE SYNTAXE ABSOLUE : N'utilise JAMAIS de guillemets doubles (") dans tes textes. Utilise EXCLUSIVEMENT des guillemets simples (').
 
 ⚠️ MISSION GLOBALE SUR TOUT LE DOCUMENT :
 1. SYNTHÈSE : Fais un résumé global, structuré et détaillé.
-2. CONCEPTS CLÉS (EXHAUSTIVITÉ TOTALE) : Extrais LE PLUS GRAND NOMBRE POSSIBLE de concepts (vise entre 15 et 30 concepts minimum !). Sois chirurgical : 1 phrase courte pour son Rôle, 1 pour son Objectif, 1 pour ses Interactions, et 1 pour son Fonctionnement.
+2. CONCEPTS CLÉS (EXHAUSTIVITÉ TOTALE) : Extrais LE PLUS GRAND NOMBRE POSSIBLE de concepts (vise 20 à 40 concepts minimum !). Sois chirurgical : 1 phrase courte pour son Rôle, 1 pour son Objectif, 1 pour ses Interactions, et 1 pour son Fonctionnement.
 3. QCM : Génère EXACTEMENT {nombre_qcm} questions.
 4. CORRECTION DÉTAILLÉE : Sous forme de liste pour chaque proposition (A, B, C, D, E) avec VRAI ou FAUX en gras.
 
@@ -110,7 +108,8 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     prompt_final = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, notes_etudiant=notes, style_question=style)
     contenu_requete = f'TEXTE À ANALYSER :\n{texte_pdf}'
     
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    # LE VRAI MOTEUR : gemini-1.5-flash (ultra rapide et fiable en JSON)
+    model = genai.GenerativeModel('gemini-1.5-flash')
     
     reponse = model.generate_content(
         [prompt_final, contenu_requete], 
@@ -169,11 +168,10 @@ if f_pdf:
                     texte_brut_ia = generer_donnees(texte_cours, t_word, matiere, difficulte, nombre_qcm, mode_examen)
                     
                     try:
-                        # 🪄 LA MAGIE EST ICI : strict=False permet à Python de pardonner les sauts de ligne de l'IA !
                         st.session_state['data'] = json.loads(texte_brut_ia, strict=False)
                         st.session_state['examen_soumis'] = False
                     except json.JSONDecodeError as json_err:
-                        st.error(f"⚠️ L'IA a fait une faute de frappe tenace (Erreur : {json_err}).")
+                        st.error(f"⚠️ Erreur de décodage. L'IA a fourni trop d'informations d'un coup.")
                         st.warning("👇 Voici tout le travail qu'elle a généré en version texte brut :")
                         with st.expander("Voir le contenu généré (à copier-coller dans un Word)"):
                             st.text(texte_brut_ia)
@@ -182,7 +180,7 @@ if f_pdf:
                     st.error(f"Erreur technique de l'application : {e}")
 
 # ==============================================================================
-# 6. Affichage Normal (Si tout s'est bien passé)
+# 6. Affichage Normal
 # ==============================================================================
 if 'data' in st.session_state:
     data = st.session_state['data']
