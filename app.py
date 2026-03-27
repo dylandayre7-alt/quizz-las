@@ -18,16 +18,12 @@ st.markdown("""
     .stTabs [data-baseweb="tab-list"] { gap: 20px; }
     .stTabs [data-baseweb="tab"] { height: 50px; background-color: #f0f2f6; border-radius: 10px 10px 0 0; padding: 10px 20px; }
     .stTabs [aria-selected="true"] { background-color: #ff4b4b; color: white; font-weight: bold; }
-    
     .synth-box { padding: 25px; background-color: #1e1e1e; color: #ffffff; border-left: 8px solid #ff4b4b; border-radius: 10px; margin-bottom: 25px; }
     .synth-box h1, .synth-box h2, .synth-box h3, .synth-box h4, .synth-box p, .synth-box li { color: #ffffff !important; }
-    
     .correct-box { background-color: #155724; padding: 15px; border-radius: 10px; margin-bottom: 10px; color: #d4edda; border: 1px solid #c3e6cb;}
     .error-box { background-color: #4a1317; padding: 15px; border-radius: 10px; margin-bottom: 10px; color: #f8d7da; border: 1px solid #f5c6cb;}
-    
     .erreur-log { border-left: 4px solid #ff4b4b; padding: 15px; margin-bottom: 15px; background-color: #2b2b2b; color: #ffffff; border-radius: 5px; border: 1px solid #444; }
     .erreur-log strong { color: #ffffff; }
-    
     .concept-card { background-color: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 5px solid #007bff; margin-bottom: 10px; color: #333; }
     .concept-card strong { color: #007bff; }
 </style>
@@ -77,42 +73,48 @@ def lire_word(buffer_fichier):
     return "\n".join([para.text for para in doc.paragraphs])
 
 # ==============================================================================
-# 3. Moteur IA (Modèle Universel "gemini-pro" pour contrer l'erreur 404)
+# 3. Moteur IA (Système Auto-Pilote)
 # ==============================================================================
 
-# --- MOTEUR 1 : LE COURS ---
+# Le Radar : Cherche le modèle qui marche sur ton compte
+def trouver_bon_moteur():
+    try:
+        # Liste tous les modèles autorisés par ta clé API
+        modeles_dispos = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        # Ordre de préférence (du plus généreux au plus vieux)
+        preferences = ['models/gemini-1.5-flash', 'models/gemini-1.5-flash-8b', 'models/gemini-1.5-pro', 'models/gemini-pro']
+        
+        for pref in preferences:
+            if pref in modeles_dispos:
+                return pref.replace('models/', '')
+        
+        # Secours absolu : prend le premier modèle texte disponible
+        for m in modeles_dispos:
+            if 'vision' not in m and 'embedding' not in m:
+                return m.replace('models/', '')
+                
+        return 'gemini-1.5-flash' # Fallback par défaut
+    except:
+        return 'gemini-1.5-flash'
+
 PROMPT_COURS = """
 Tu es un Professeur expert en LAS 1. Matière : {matiere}. NOTES DE L'ÉTUDIANT : "{notes_etudiant}"
-
-⚠️ RÈGLE INFORMATIQUE CRITIQUE : N'utilise JAMAIS de guillemets doubles (") dans tes textes (utilise '). NE FAIS JAMAIS DE RETOURS À LA LIGNE DANS LE JSON. Pour "fiche_synthese", tu DOIS fournir une LISTE (Array) où chaque élément est un paragraphe.
-
+⚠️ RÈGLE INFORMATIQUE CRITIQUE : N'utilise JAMAIS de guillemets doubles (") (utilise '). NE FAIS JAMAIS DE RETOURS À LA LIGNE DANS LE JSON. Pour "fiche_synthese", tu DOIS fournir une LISTE (Array).
 MISSION 1 :
-1. SYNTHÈSE : Fais un résumé global, structuré sous forme de liste de paragraphes.
-2. CONCEPTS CLÉS : Vise entre 20 et 40 concepts ! Reste très bref (1 phrase par clé).
-
+1. SYNTHÈSE : Fais un résumé global (liste de paragraphes).
+2. CONCEPTS CLÉS : Vise entre 10 et 15 concepts max. (1 phrase par clé).
 FORMAT JSON STRICT :
 {{
-  "fiche_synthese": [
-    "### Grand Titre",
-    "Paragraphe 1...",
-    "Paragraphe 2..."
-  ],
-  "concepts_cles": [
-    {{
-      "nom": "Nom...", "role": "Rôle...", "objectif": "But...", "avec_quoi": "Interactions...", "comment": "Fonctionnement..."
-    }}
-  ]
+  "fiche_synthese": ["### Titre", "Paragraphe 1..."],
+  "concepts_cles": [{{"nom": "Nom...", "role": "Rôle...", "objectif": "But...", "avec_quoi": "Interactions...", "comment": "Fonctionnement..."}}]
 }}
 """
 
-# --- MOTEUR 2 : L'ENTRAÎNEMENT ---
 PROMPT_QCM = """
 Tu es un Professeur expert en LAS 1. Matière : {matiere} | Difficulté : {difficulte}/10 | Nombre QCM : {nombre_qcm} | STYLE : {style_question}
-
-⚠️ RÈGLE INFORMATIQUE CRITIQUE : N'utilise JAMAIS de guillemets doubles (") dans tes textes (utilise '). NE FAIS JAMAIS DE RETOURS À LA LIGNE. L'explication DOIT être une LISTE (Array).
-
+⚠️ RÈGLE INFORMATIQUE CRITIQUE : N'utilise JAMAIS de guillemets doubles (") (utilise '). NE FAIS JAMAIS DE RETOURS À LA LIGNE. L'explication DOIT être une LISTE (Array).
 MISSION 2 : Génère EXACTEMENT {nombre_qcm} questions complexes. Pour l'explication, liste chaque proposition avec VRAI ou FAUX.
-
 FORMAT JSON STRICT :
 {{
   "qcm": [
@@ -120,10 +122,7 @@ FORMAT JSON STRICT :
       "type_question": "Conceptuelle", "question": "...",
       "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
       "reponses_correctes": ["A", "C"],
-      "explication": [
-        "**A) VRAI** : explication...",
-        "**B) FAUX** : explication..."
-      ],
+      "explication": ["**A) VRAI** : explication...", "**B) FAUX** : explication..."],
       "source_cours": "Source...", "indice": "Indice...", "mnemotechnique": "Astuce..."
     }}
   ]
@@ -135,17 +134,17 @@ def generer_cours_complet(texte_pdf, texte_word, matiere, difficulte, nombre_qcm
     style = 'Style ANNALES (Très Difficile, prop E).' if est_mode_examen else 'Style APPRENTISSAGE.'
     contenu_requete = f'TEXTE À ANALYSER :\n{texte_pdf}'
     
-    # LE MOTEUR UNIVERSEL QUI MARCHE SUR TOUS LES SERVEURS
-    model = genai.GenerativeModel('gemini-pro')
-    # Configuration allégée pour être compatible avec les vieilles versions de Streamlit
-    config = {'temperature': 0.4, 'max_output_tokens': 8192}
+    # Appel de la fonction Radar pour trouver le modèle qui ne fera pas d'erreur 404
+    nom_moteur = trouver_bon_moteur()
+    model = genai.GenerativeModel(nom_moteur)
+    config = {'response_mime_type': 'application/json', 'temperature': 0.4}
 
-    # APPEL 1 : Cours & Concepts
+    # APPEL 1
     prompt_c = PROMPT_COURS.format(matiere=matiere, notes_etudiant=notes)
     rep_cours = model.generate_content([prompt_c, contenu_requete], generation_config=config)
     json_cours = json.loads(nettoyer_json(rep_cours.text), strict=False)
 
-    # APPEL 2 : QCM
+    # APPEL 2
     prompt_q = PROMPT_QCM.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, style_question=style)
     rep_qcm = model.generate_content([prompt_q, contenu_requete], generation_config=config)
     json_qcm = json.loads(nettoyer_json(rep_qcm.text), strict=False)
@@ -153,7 +152,8 @@ def generer_cours_complet(texte_pdf, texte_word, matiere, difficulte, nombre_qcm
     donnees_finales = {
         "fiche_synthese": json_cours.get("fiche_synthese", []),
         "concepts_cles": json_cours.get("concepts_cles", []),
-        "qcm": json_qcm.get("qcm", [])
+        "qcm": json_qcm.get("qcm", []),
+        "moteur_utilise": nom_moteur # On sauvegarde le nom pour te l'afficher si besoin
     }
     return donnees_finales
 
@@ -193,21 +193,20 @@ if f_pdf:
             texte_cours = extraire_texte_pdf(f_pdf, p_deb, p_fin)
             t_word = lire_word(f_word) if f_word else ""
             
-            progress_text = "Opération 1/2 : Extraction exhaustive de la Synthèse et des Concepts..."
-            bar = st.progress(0, text=progress_text)
+            bar = st.progress(0, text="Connexion aux serveurs de Google et choix du meilleur moteur...")
             
             try:
                 donnees_fusionnees = generer_cours_complet(texte_cours, t_word, matiere, difficulte, nombre_qcm, mode_examen)
-                bar.progress(100, text="Opération 2/2 : Génération des QCM terminée ! ✅")
+                bar.progress(100, text=f"Terminé ! (Moteur utilisé : {donnees_fusionnees.get('moteur_utilise')}) ✅")
                 
                 st.session_state['data'] = donnees_fusionnees
                 st.session_state['examen_soumis'] = False
                 st.rerun()
 
             except json.JSONDecodeError as json_err:
-                st.error(f"⚠️ Erreur de formatage IA ({json_err}). Essayez de relancer ou de réduire le nombre de pages.")
+                st.error("⚠️ Format corrompu par l'IA. Essaye de relancer.")
             except Exception as e: 
-                st.error(f"Erreur technique de l'application : {e}")
+                st.error(f"Erreur d'API : {e}")
 
 # ==============================================================================
 # 6. Affichage Normal
@@ -244,7 +243,7 @@ if 'data' in st.session_state:
             st.warning("Aucun QCM n'a pu être généré.")
         
         elif not st.session_state.get('examen_soumis'):
-            if mode_examen: st.warning("🚨 **MODE EXAMEN ACTIF** : Coche tes réponses, puis valide ta copie tout en bas.")
+            if mode_examen: st.warning("🚨 **MODE EXAMEN ACTIF**")
             
             for i, q in enumerate(liste_qcm):
                 st.markdown(f"**Question {i+1}** : {q.get('question', '')}", unsafe_allow_html=True)
@@ -279,8 +278,7 @@ if 'data' in st.session_state:
                         st.markdown(texte_explication, unsafe_allow_html=True)
                 st.divider()
             
-            texte_bouton_final = "🏁 Valider ma copie et enregistrer mes erreurs" if mode_examen else "✅ Tout corriger et enregistrer mes erreurs"
-            if st.button(texte_bouton_final, type="primary", use_container_width=True):
+            if st.button("Valider ma copie", type="primary", use_container_width=True):
                 st.session_state['examen_soumis'] = True
                 st.rerun()
         else:
@@ -298,10 +296,9 @@ if 'data' in st.session_state:
                 st.write(f"Ton choix: {', '.join(mes_choix) if mes_choix else 'Aucune'} | Correction: {', '.join(bonnes)}")
                 with st.expander("Détails"): 
                     st.markdown(texte_explication, unsafe_allow_html=True)
-                    st.info(f"**💡 Astuce pour la prochaine fois :** {q.get('mnemotechnique', '')}")
 
             st.metric("Note Finale", f"{(score/len(liste_qcm))*20:.1f} / 20")
-            if st.button("Recommencer un nouveau test"): st.session_state['examen_soumis'] = False; st.rerun()
+            if st.button("Recommencer"): st.session_state['examen_soumis'] = False; st.rerun()
 
     with t4:
         try:
@@ -322,15 +319,3 @@ if 'data' in st.session_state:
                     texte_word += f"Date: {e['date']}\nQ: {e['question']}\nMon erreur: {e['choix_user']}\nBonne rep: {e['bonnes_rep']}\nExplication:\n{explication_propre}\n\n"
             
             st.download_button("📝 Télécharger pour coller dans Word", texte_word, "mes_erreurs.txt")
-            
-            for mat, errs in mem.items():
-                with st.expander(f"Matière : {mat} ({len(errs)} erreurs)"):
-                    for e in reversed(errs):
-                        st.markdown(f"""
-                        <div class='erreur-log'>
-                            <strong>{e['question']}</strong><br>
-                            <span style='color:#ff4b4b'>Choix: {e['choix_user']}</span> | 
-                            <span style='color:#28a745'>Rep: {e['bonnes_rep']}</span><br>
-                            <small>{e['explication']}</small>
-                        </div>
-                        """, unsafe_allow_html=True)
