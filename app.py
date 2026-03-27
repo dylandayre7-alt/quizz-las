@@ -34,7 +34,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Gestion de la Mémoire Session
+# 2. Utilitaires & Mémoire
 # ==============================================================================
 if 'cahier_memoire' not in st.session_state:
     st.session_state['cahier_memoire'] = {}
@@ -77,10 +77,10 @@ def lire_word(buffer_fichier):
     return "\n".join([para.text for para in doc.paragraphs])
 
 # ==============================================================================
-# 3. Moteur IA (ARCHITECTURE BI-TURBO SÉPARÉE)
+# 3. Moteur IA (Modèle Universel "gemini-pro" pour contrer l'erreur 404)
 # ==============================================================================
 
-# --- MOTEUR 1 : LE COURS (Synthèse + Concepts) ---
+# --- MOTEUR 1 : LE COURS ---
 PROMPT_COURS = """
 Tu es un Professeur expert en LAS 1. Matière : {matiere}. NOTES DE L'ÉTUDIANT : "{notes_etudiant}"
 
@@ -105,7 +105,7 @@ FORMAT JSON STRICT :
 }}
 """
 
-# --- MOTEUR 2 : L'ENTRAÎNEMENT (QCM + Correction) ---
+# --- MOTEUR 2 : L'ENTRAÎNEMENT ---
 PROMPT_QCM = """
 Tu es un Professeur expert en LAS 1. Matière : {matiere} | Difficulté : {difficulte}/10 | Nombre QCM : {nombre_qcm} | STYLE : {style_question}
 
@@ -135,9 +135,10 @@ def generer_cours_complet(texte_pdf, texte_word, matiere, difficulte, nombre_qcm
     style = 'Style ANNALES (Très Difficile, prop E).' if est_mode_examen else 'Style APPRENTISSAGE.'
     contenu_requete = f'TEXTE À ANALYSER :\n{texte_pdf}'
     
-    # 🌟 FORCAGE DU MODÈLE LATEST : On s'assure que Google trouve le modèle exact
-    model = genai.GenerativeModel('gemini-1.5-flash-latest')
-    config = {'response_mime_type': 'application/json', 'temperature': 0.4, 'max_output_tokens': 8192}
+    # LE MOTEUR UNIVERSEL QUI MARCHE SUR TOUS LES SERVEURS
+    model = genai.GenerativeModel('gemini-pro')
+    # Configuration allégée pour être compatible avec les vieilles versions de Streamlit
+    config = {'temperature': 0.4, 'max_output_tokens': 8192}
 
     # APPEL 1 : Cours & Concepts
     prompt_c = PROMPT_COURS.format(matiere=matiere, notes_etudiant=notes)
@@ -204,7 +205,7 @@ if f_pdf:
                 st.rerun()
 
             except json.JSONDecodeError as json_err:
-                st.error(f"⚠️ Erreur critique du fichier source ({json_err}). Essayez de réduire un peu le nombre de pages.")
+                st.error(f"⚠️ Erreur de formatage IA ({json_err}). Essayez de relancer ou de réduire le nombre de pages.")
             except Exception as e: 
                 st.error(f"Erreur technique de l'application : {e}")
 
