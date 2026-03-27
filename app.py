@@ -117,7 +117,7 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     contenu_requete = f'TEXTE À ANALYSER :\n{texte_pdf}'
     
     # LE MOTEUR UNIVERSEL
-    model = genai.GenerativeModel('gemini-pro')
+    model = genai.GenerativeModel('gemini-2.5')
     
     # CONFIGURATION MINIMALE (sans 'response_mime_type' qui fait planter les vieux serveurs)
     reponse = model.generate_content(
