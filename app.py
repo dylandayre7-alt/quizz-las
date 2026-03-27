@@ -49,45 +49,13 @@ def ajouter_erreur_session(matiere, question, choix_user, bonnes_rep, explicatio
         "choix_user": choix_user, "bonnes_rep": bonnes_rep, "explication": explication
     })
 
-# ==============================================================================
-# 3. Moteur IA (Le Vrai 2.5 Flash + Sécurité HTML Max)
-# ==============================================================================
-SYSTEM_PROMPT = """
-Tu es un Professeur expert en LAS 1. 
-Matière : {matiere} | Difficulté : {difficulte}/10 | Nombre total de QCM : {nombre_qcm}
-
-STYLE : {style_question}
-NOTES DE L'ÉTUDIANT : "{notes_etudiant}"
-
-⚠️ SÉCURITÉ INFORMATIQUE CRITIQUE (POUR NE PAS FAIRE PLANTER LE SITE) :
-1. INTERDICTION FORMELLE d'utiliser des guillemets doubles (") à l'intérieur de tes textes. Utilise EXCLUSIVEMENT des guillemets simples (').
-2. INTERDICTION FORMELLE de faire de vrais retours à la ligne (touche Entrée) dans tes valeurs JSON. Tu dois écrire de longues lignes continues. Pour sauter une ligne visuellement, écris UNIQUEMENT la balise HTML <br>.
-
-⚠️ MISSION GLOBALE :
-1. SYNTHÈSE : Fais un résumé global et détaillé. (Utilise <br> pour aérer).
-2. CONCEPTS CLÉS : Extrais LE PLUS GRAND NOMBRE POSSIBLE de concepts (vise 20 à 40 concepts minimum !). Sois chirurgical et bref pour ne pas saturer.
-3. QCM : Génère EXACTEMENT {nombre_qcm} questions.
-4. CORRECTION DÉTAILLÉE : Explique chaque proposition (A, B, C, D, E) avec VRAI ou FAUX. (Utilise <br> pour séparer les explications de chaque lettre).
-
-FORMAT JSON STRICT :
-{{
-  "fiche_synthese": "Titre<br>Paragraphe 1...<br><br>Paragraphe 2...",
-  "concepts_cles": [
-    {{
-      "nom": "Nom...", "role": "Rôle...", "objectif": "But...", "avec_quoi": "Interactions...", "comment": "Fonctionnement..."
-    }}
-  ],
-  "qcm": [
-    {{
-      "type_question": "Conceptuelle", "question": "...",
-      "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
-      "reponses_correctes": ["A", "C"],
-      "explication": "**A) VRAI** : explication...<br>**B) FAUX** : explication...<br>**C) VRAI** : explication...",
-      "source_cours": "Source...", "indice": "Indice...", "mnemotechnique": "Astuce..."
-    }}
-  ]
-}}
-"""
+def nettoyer_json(texte):
+    texte_brut = texte.strip()
+    texte_brut = re.sub(r'^```[a-zA-Z]*\n', '', texte_brut)
+    texte_brut = re.sub(r'^```', '', texte_brut)
+    texte_brut = re.sub(r'\n```$', '', texte_brut)
+    texte_brut = re.sub(r'```$', '', texte_brut)
+    return texte_brut.strip()
 
 def extraire_texte_pdf(buffer_fichier, page_debut, page_fin):
     buffer_fichier.seek(0)
@@ -103,33 +71,86 @@ def lire_word(buffer_fichier):
     doc = docx.Document(buffer_fichier)
     return "\n".join([para.text for para in doc.paragraphs])
 
-def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen):
+# ==============================================================================
+# 3. Moteur IA (ARCHITECTURE BI-TURBO SÉPARÉE)
+# ==============================================================================
+
+# --- MOTEUR 1 : LE COURS (Synthèse + Concepts) ---
+PROMPT_COURS = """
+Tu es un Professeur expert en LAS 1. 
+Matière : {matiere}
+
+NOTES DE L'ÉTUDIANT : "{notes_etudiant}"
+
+⚠️ RÈGLE DE SYNTAXE : N'utilise JAMAIS de guillemets doubles (") dans tes textes. Utilise des guillemets simples ('). Utilise la balise <br> pour sauter des lignes.
+
+MISSION 1 (THÉORIE UNIQUEMENT) :
+1. SYNTHÈSE : Fais un résumé global et détaillé.
+2. CONCEPTS CLÉS (EXHAUSTIVITÉ MAXIMALE) : Extrais LE PLUS GRAND NOMBRE POSSIBLE de concepts du texte (vise entre 20 et 50 concepts !). Sois bref pour chaque concept (1 phrase par attribut) afin de pouvoir tous les lister.
+
+FORMAT JSON STRICT :
+{{
+  "fiche_synthese": "Résumé...",
+  "concepts_cles": [
+    {{
+      "nom": "Nom...", "role": "Rôle...", "objectif": "But...", "avec_quoi": "Interactions...", "comment": "Fonctionnement..."
+    }}
+  ]
+}}
+"""
+
+# --- MOTEUR 2 : L'ENTRAÎNEMENT (QCM + Correction) ---
+PROMPT_QCM = """
+Tu es un Professeur expert en LAS 1. 
+Matière : {matiere} | Difficulté : {difficulte}/10 | Nombre total de QCM : {nombre_qcm}
+
+STYLE : {style_question}
+
+⚠️ RÈGLE DE SYNTAXE : N'utilise JAMAIS de guillemets doubles (") dans tes textes. Utilise des guillemets simples ('). Utilise la balise <br> pour sauter des lignes.
+
+MISSION 2 (QCM UNIQUEMENT) :
+Génère EXACTEMENT {nombre_qcm} questions complexes basées sur le texte fourni, en balayant tout le document.
+Pour l'explication, liste chaque proposition avec VRAI ou FAUX en gras, suivi de la justification.
+
+FORMAT JSON STRICT :
+{{
+  "qcm": [
+    {{
+      "type_question": "Conceptuelle", "question": "...",
+      "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
+      "reponses_correctes": ["A", "C"],
+      "explication": "**A) VRAI** : explication...<br>**B) FAUX** : explication...<br>**C) VRAI** : explication...",
+      "source_cours": "Source...", "indice": "Indice...", "mnemotechnique": "Astuce..."
+    }}
+  ]
+}}
+"""
+
+def generer_cours_complet(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen):
     notes = texte_word if texte_word else 'Aucune note.'
     style = 'Style ANNALES (Très Difficile, QCM à choix multiples, prop E).' if est_mode_examen else 'Style APPRENTISSAGE.'
-    
-    prompt_final = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, notes_etudiant=notes, style_question=style)
     contenu_requete = f'TEXTE À ANALYSER :\n{texte_pdf}'
     
-    # Moteur original remis en place
-    model = genai.GenerativeModel('gemini-2.5-flash')
-    
-    reponse = model.generate_content(
-        [prompt_final, contenu_requete], 
-        generation_config={
-            'response_mime_type': 'application/json', 
-            'temperature': 0.4,
-            'max_output_tokens': 8192 
-        }
-    )
-    
-    # Nettoyage sécurisé
-    texte_brut = reponse.text.strip()
-    texte_brut = re.sub(r'^```[a-zA-Z]*\n', '', texte_brut) # Enlève le ```json du début
-    texte_brut = re.sub(r'^```', '', texte_brut)
-    texte_brut = re.sub(r'\n```$', '', texte_brut)
-    texte_brut = re.sub(r'```$', '', texte_brut)
-    
-    return texte_brut.strip() 
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    config = {'response_mime_type': 'application/json', 'temperature': 0.4, 'max_output_tokens': 8192}
+
+    # APPEL 1 : On génère le cours et les concepts
+    prompt_c = PROMPT_COURS.format(matiere=matiere, notes_etudiant=notes)
+    rep_cours = model.generate_content([prompt_c, contenu_requete], generation_config=config)
+    json_cours = json.loads(nettoyer_json(rep_cours.text), strict=False)
+
+    # APPEL 2 : On génère les QCM (Le compteur de tokens repart à zéro !)
+    prompt_q = PROMPT_QCM.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, style_question=style)
+    rep_qcm = model.generate_content([prompt_q, contenu_requete], generation_config=config)
+    json_qcm = json.loads(nettoyer_json(rep_qcm.text), strict=False)
+
+    # On fusionne les deux résultats en un seul dictionnaire propre
+    donnees_finales = {
+        "fiche_synthese": json_cours.get("fiche_synthese", "Erreur de synthèse."),
+        "concepts_cles": json_cours.get("concepts_cles", []),
+        "qcm": json_qcm.get("qcm", [])
+    }
+    return donnees_finales
 
 # ==============================================================================
 # 4. Interface Sidebar
@@ -164,26 +185,26 @@ if f_pdf:
         if not api_key: 
             st.error("Clé API manquante !")
         else:
-            with st.spinner(f"L'IA extrait massivement les concepts et QCM de tes {p_fin - p_deb + 1} pages sans crasher..."):
-                try:
-                    texte_cours = extraire_texte_pdf(f_pdf, p_deb, p_fin)
-                    t_word = lire_word(f_word) if f_word else ""
-                    
-                    texte_brut_ia = generer_donnees(texte_cours, t_word, matiere, difficulte, nombre_qcm, mode_examen)
-                    
-                    try:
-                        # strict=False permet de pardonner les petits caractères de contrôle invisibles
-                        st.session_state['data'] = json.loads(texte_brut_ia, strict=False)
-                        st.session_state['examen_soumis'] = False
-                    except json.JSONDecodeError as json_err:
-                        # Le parachute final au cas où
-                        st.error(f"⚠️ Erreur de décodage ({json_err}).")
-                        st.warning("👇 Le fichier JSON a vacillé, mais voici tout le travail généré en version texte brut :")
-                        with st.expander("Voir le contenu généré (à copier-coller)"):
-                            st.text(texte_brut_ia)
-                            
-                except Exception as e: 
-                    st.error(f"Erreur technique de l'application : {e}")
+            texte_cours = extraire_texte_pdf(f_pdf, p_deb, p_fin)
+            t_word = lire_word(f_word) if f_word else ""
+            
+            # Barre de progression pour rassurer pendant les deux appels
+            progress_text = "Opération 1/2 : Extraction exhaustive des Concepts..."
+            bar = st.progress(0, text=progress_text)
+            
+            try:
+                # Execution du moteur bi-turbo
+                donnees_fusionnees = generer_cours_complet(texte_cours, t_word, matiere, difficulte, nombre_qcm, mode_examen)
+                bar.progress(100, text="Opération 2/2 : Génération des QCM terminée ! ✅")
+                
+                st.session_state['data'] = donnees_fusionnees
+                st.session_state['examen_soumis'] = False
+                st.rerun()
+
+            except json.JSONDecodeError as json_err:
+                st.error(f"⚠️ Erreur critique : Le fichier source est corrompu ({json_err}). Essayez de réduire le nombre de pages.")
+            except Exception as e: 
+                st.error(f"Erreur technique de l'application : {e}")
 
 # ==============================================================================
 # 6. Affichage Normal
@@ -196,7 +217,6 @@ if 'data' in st.session_state:
     t1, t2, t3, t4, t5 = st.tabs(["📖 Fiche", "🎯 Concepts Clés", "✍️ QCM", "🗂️ Anki", "📓 Cahier d'Erreurs"])
 
     with t1: 
-        # unsafe_allow_html=True permet à Streamlit de transformer les <br> en vrais sauts de ligne à l'écran
         st.markdown(f"<div class='synth-box'><h3>📌 Synthèse</h3>{data.get('fiche_synthese', '')}</div>", unsafe_allow_html=True)
 
     with t2:
@@ -217,7 +237,7 @@ if 'data' in st.session_state:
 
     with t3:
         if not liste_qcm or len(liste_qcm) == 0:
-            st.warning("Génération des QCM échouée, relance stp.")
+            st.warning("Aucun QCM n'a pu être généré.")
         
         elif not st.session_state.get('examen_soumis'):
             if mode_examen: st.warning("🚨 **MODE EXAMEN ACTIF** : Coche tes réponses, puis valide ta copie tout en bas.")
@@ -294,7 +314,6 @@ if 'data' in st.session_state:
             for mat, errs in mem.items():
                 texte_word += f"--- MATIÈRE : {mat} ---\n"
                 for e in errs:
-                    # Remplacement des <br> par de vrais sauts de ligne pour le fichier texte Word
                     explication_propre = str(e['explication']).replace('<br>', '\n')
                     texte_word += f"Date: {e['date']}\nQ: {e['question']}\nMon erreur: {e['choix_user']}\nBonne rep: {e['bonnes_rep']}\nExplication:\n{explication_propre}\n\n"
             
