@@ -6,6 +6,7 @@ import pandas as pd
 import docx
 import os
 from datetime import datetime
+import re
 
 # ==============================================================================
 # 1. Configuration et Design
@@ -49,7 +50,7 @@ def ajouter_erreur_session(matiere, question, choix_user, bonnes_rep, explicatio
     })
 
 # ==============================================================================
-# 3. Moteur IA (Consigne "Concepts" poussée au maximum)
+# 3. Moteur IA (Format Ultra Strict)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en LAS 1. 
@@ -58,12 +59,15 @@ Matière : {matiere} | Difficulté : {difficulte}/10 | Nombre total de QCM : {no
 STYLE : {style_question}
 NOTES DE L'ÉTUDIANT : "{notes_etudiant}"
 
-⚠️ RÈGLE DE SYNTAXE ABSOLUE : N'utilise JAMAIS de guillemets doubles (") dans tes textes. Utilise EXCLUSIVEMENT des guillemets simples (').
+⚠️ SÉCURITÉ INFORMATIQUE MAXIMALE (POUR ÉVITER LE CRASH DU SITE) :
+1. Ton format DOIT être un JSON absolument parfait.
+2. INTERDICTION FORMELLE D'UTILISER DES GUILLEMETS DOUBLES (") à l'intérieur de tes phrases. Utilise UNIQUEMENT des guillemets simples (') ou des chevrons (<< >>) pour citer.
+3. N'oublie aucune virgule entre les éléments des listes.
 
 ⚠️ MISSION GLOBALE SUR TOUT LE DOCUMENT :
 1. SYNTHÈSE : Fais un résumé global, structuré et détaillé.
-2. CONCEPTS CLÉS (EXHAUSTIVITÉ TOTALE) : Ton objectif principal est la QUANTITÉ. Extrais LE PLUS GRAND NOMBRE POSSIBLE de concepts, molécules, structures, ou lois de ce cours. Vise OBLIGATOIREMENT entre 20 et 40 concepts minimum ! Pour pouvoir en lister autant d'un coup, sois chirurgical : donne juste 1 petite phrase pour son Rôle, 1 pour son Objectif, 1 pour ses Interactions (Avec quoi), et 1 pour son Fonctionnement (Comment). Ne rate aucun élément clé de ton document.
-3. QCM : Génère EXACTEMENT {nombre_qcm} questions en balayant bien le début, le milieu et la fin du document.
+2. CONCEPTS CLÉS (EXHAUSTIVITÉ TOTALE) : Extrais LE PLUS GRAND NOMBRE POSSIBLE de concepts (vise entre 15 et 30 concepts minimum !). Sois chirurgical : 1 phrase courte pour son Rôle, 1 pour son Objectif, 1 pour ses Interactions, et 1 pour son Fonctionnement.
+3. QCM : Génère EXACTEMENT {nombre_qcm} questions.
 4. CORRECTION DÉTAILLÉE : Sous forme de liste pour chaque proposition (A, B, C, D, E) avec VRAI ou FAUX en gras.
 
 FORMAT JSON STRICT :
@@ -109,7 +113,6 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     
     model = genai.GenerativeModel('gemini-2.5-flash')
     
-    # max_output_tokens très élevé pour autoriser l'IA à écrire une très longue liste de concepts sans s'arrêter
     reponse = model.generate_content(
         [prompt_final, contenu_requete], 
         generation_config={
@@ -119,8 +122,13 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
         }
     )
     
-    texte_brut = reponse.text.strip().replace('```json', '').replace('```', '').strip()
-    return json.loads(texte_brut)
+    # Nettoyage propre sans utiliser le startswith qui buggait au copier/coller
+    texte_brut = reponse.text.strip()
+    texte_brut = re.sub(r'^```json\s*', '', texte_brut)
+    texte_brut = re.sub(r'^```\s*', '', texte_brut)
+    texte_brut = re.sub(r'\s*```$', '', texte_brut)
+    
+    return texte_brut.strip() # On renvoie le texte brut, pas le dictionnaire converti
 
 # ==============================================================================
 # 4. Interface Sidebar
@@ -160,15 +168,25 @@ if f_pdf:
                     texte_cours = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                     t_word = lire_word(f_word) if f_word else ""
                     
-                    st.session_state['data'] = generer_donnees(texte_cours, t_word, matiere, difficulte, nombre_qcm, mode_examen)
-                    st.session_state['examen_soumis'] = False
-                except json.JSONDecodeError as e:
-                    st.error("⚠️ L'IA a fait une erreur de mise en forme. Relance !")
+                    # On récupère d'abord le texte brut généré par l'IA
+                    texte_brut_ia = generer_donnees(texte_cours, t_word, matiere, difficulte, nombre_qcm, mode_examen)
+                    
+                    # On tente de le transformer en format "Application" (JSON)
+                    try:
+                        st.session_state['data'] = json.loads(texte_brut_ia)
+                        st.session_state['examen_soumis'] = False
+                    except json.JSONDecodeError as json_err:
+                        # LE PARACHUTE : Si l'IA a fait une erreur de syntaxe, on affiche quand même son travail
+                        st.error(f"⚠️ L'IA a fait une faute de frappe informatique (Erreur : {json_err}). Le site n'a pas pu créer les boutons.")
+                        st.warning("👇 Mais ton temps n'est pas perdu ! Voici tout le travail qu'elle a généré en version texte brut :")
+                        with st.expander("Voir le contenu généré (à copier-coller dans un Word)"):
+                            st.text(texte_brut_ia)
+                            
                 except Exception as e: 
-                    st.error(f"Erreur technique : {e}")
+                    st.error(f"Erreur technique de l'application : {e}")
 
 # ==============================================================================
-# 6. Affichage
+# 6. Affichage Normal (Si tout s'est bien passé)
 # ==============================================================================
 if 'data' in st.session_state:
     data = st.session_state['data']
