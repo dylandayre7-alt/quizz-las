@@ -1,11 +1,11 @@
 import streamlit as st
 import fitz  # PyMuPDF
-import google.generativeai as genai
 import json
 import pandas as pd
 import docx
 from datetime import datetime
 import re
+import requests
 
 # ==============================================================================
 # 1. Configuration et Design
@@ -70,7 +70,7 @@ def lire_word(buffer_fichier):
     return "\n".join([para.text for para in doc.paragraphs])
 
 # ==============================================================================
-# 3. Moteur IA (Le VRAI moteur universel sans configuration récente)
+# 3. Moteur IA (HTTP Direct avec Gemini 2.5 Flash)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en LAS 1. 
@@ -109,24 +109,36 @@ FORMAT JSON STRICT :
 }}
 """
 
-def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen):
+def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key):
     notes = texte_word if texte_word else 'Aucune note.'
     style = 'Style ANNALES (Très Difficile, QCM à choix multiples, prop E).' if est_mode_examen else 'Style APPRENTISSAGE.'
     
     prompt_final = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, notes_etudiant=notes, style_question=style)
-    contenu_requete = f'TEXTE À ANALYSER :\n{texte_pdf}'
     
-    # LE MOTEUR UNIVERSEL
-    model = genai.GenerativeModel('gemini-2.5')
+    # URL CORRIGÉE AVEC LE MOT "-flash"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
     
-    # CONFIGURATION MINIMALE (sans 'response_mime_type' qui fait planter les vieux serveurs)
-    reponse = model.generate_content(
-        [prompt_final, contenu_requete], 
-        generation_config={'temperature': 0.4}
-    )
+    headers = {'Content-Type': 'application/json'}
+    payload = {
+        "contents": [{
+            "parts": [{"text": prompt_final + "\n\nTEXTE À ANALYSER :\n" + texte_pdf}]
+        }],
+        "generationConfig": {
+            "temperature": 0.4,
+            "responseMimeType": "application/json"
+        }
+    }
     
-    texte_brut = nettoyer_json(reponse.text)
-    return json.loads(texte_brut, strict=False)
+    reponse = requests.post(url, headers=headers, json=payload)
+    
+    if reponse.status_code != 200:
+        raise Exception(f"Erreur API ({reponse.status_code}) : {reponse.text}")
+        
+    data_json = reponse.json()
+    texte_brut = data_json['candidates'][0]['content']['parts'][0]['text']
+    
+    texte_nettoye = nettoyer_json(texte_brut)
+    return json.loads(texte_nettoye, strict=False)
 
 # ==============================================================================
 # 4. Interface Sidebar
@@ -134,7 +146,6 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
 with st.sidebar:
     st.header("⚙️ Configuration")
     api_key = st.text_input("Clé API Gemini :", type="password")
-    if api_key: genai.configure(api_key=api_key)
     st.divider()
     matiere = st.selectbox("Matière :", ["Biologie / Biochimie", "Épidémiologie / Biostats", "Anatomie", "Pharmacologie", "Droit Médical"])
     difficulte = st.slider("Difficulté :", 1, 10, 8)
@@ -161,16 +172,16 @@ if f_pdf:
         if not api_key: 
             st.error("Clé API manquante !")
         else:
-            with st.spinner(f"Analyse de tes cours en cours (Mode Universel)..."):
+            with st.spinner(f"Connexion directe à Gemini 2.5 Flash..."):
                 try:
                     texte_cours = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                     t_word = lire_word(f_word) if f_word else ""
                     
-                    st.session_state['data'] = generer_donnees(texte_cours, t_word, matiere, difficulte, nombre_qcm, mode_examen)
+                    st.session_state['data'] = generer_donnees(texte_cours, t_word, matiere, difficulte, nombre_qcm, mode_examen, api_key)
                     st.session_state['examen_soumis'] = False
                     st.rerun()
                 except json.JSONDecodeError as json_err:
-                    st.error(f"⚠️ Erreur de formatage : {json_err}. Essaye de relancer.")
+                    st.error(f"⚠️ Erreur de formatage. Essaye de relancer.")
                 except Exception as e: 
                     st.error(f"Erreur de génération : {e}")
 
