@@ -50,7 +50,7 @@ def ajouter_erreur_session(matiere, question, choix_user, bonnes_rep, explicatio
     })
 
 # ==============================================================================
-# 3. Moteur IA (Version 1.5 Flash - Ultra Fiable)
+# 3. Moteur IA (Le vrai moteur 2.5 Flash, robuste et moderne)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en LAS 1. 
@@ -108,8 +108,8 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     prompt_final = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, notes_etudiant=notes, style_question=style)
     contenu_requete = f'TEXTE À ANALYSER :\n{texte_pdf}'
     
-    # LE VRAI MOTEUR : gemini-1.5-flash (ultra rapide et fiable en JSON)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    # LE BON MOTEUR 
+    model = genai.GenerativeModel('gemini-2.5-flash')
     
     reponse = model.generate_content(
         [prompt_final, contenu_requete], 
@@ -171,8 +171,8 @@ if f_pdf:
                         st.session_state['data'] = json.loads(texte_brut_ia, strict=False)
                         st.session_state['examen_soumis'] = False
                     except json.JSONDecodeError as json_err:
-                        st.error(f"⚠️ Erreur de décodage. L'IA a fourni trop d'informations d'un coup.")
-                        st.warning("👇 Voici tout le travail qu'elle a généré en version texte brut :")
+                        st.error(f"⚠️ L'IA a fait une faute de frappe tenace (Erreur : {json_err}).")
+                        st.warning("👇 Mais voici tout le travail qu'elle a généré en version texte brut :")
                         with st.expander("Voir le contenu généré (à copier-coller dans un Word)"):
                             st.text(texte_brut_ia)
                             
