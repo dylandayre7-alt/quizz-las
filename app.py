@@ -1,12 +1,11 @@
 import streamlit as st
 import fitz  # PyMuPDF
-import google.generativeai as genai
 import json
 import pandas as pd
 import docx
-import os
 from datetime import datetime
 import re
+import requests
 
 # ==============================================================================
 # 1. Configuration et Design
@@ -18,23 +17,19 @@ st.markdown("""
     .stTabs [data-baseweb="tab-list"] { gap: 20px; }
     .stTabs [data-baseweb="tab"] { height: 50px; background-color: #f0f2f6; border-radius: 10px 10px 0 0; padding: 10px 20px; }
     .stTabs [aria-selected="true"] { background-color: #ff4b4b; color: white; font-weight: bold; }
-    
     .synth-box { padding: 25px; background-color: #1e1e1e; color: #ffffff; border-left: 8px solid #ff4b4b; border-radius: 10px; margin-bottom: 25px; }
     .synth-box h1, .synth-box h2, .synth-box h3, .synth-box h4, .synth-box p, .synth-box li { color: #ffffff !important; }
-    
     .correct-box { background-color: #155724; padding: 15px; border-radius: 10px; margin-bottom: 10px; color: #d4edda; border: 1px solid #c3e6cb;}
     .error-box { background-color: #4a1317; padding: 15px; border-radius: 10px; margin-bottom: 10px; color: #f8d7da; border: 1px solid #f5c6cb;}
-    
     .erreur-log { border-left: 4px solid #ff4b4b; padding: 15px; margin-bottom: 15px; background-color: #2b2b2b; color: #ffffff; border-radius: 5px; border: 1px solid #444; }
     .erreur-log strong { color: #ffffff; }
-    
     .concept-card { background-color: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 5px solid #007bff; margin-bottom: 10px; color: #333; }
     .concept-card strong { color: #007bff; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Gestion de la Mémoire Session & Utilitaires
+# 2. Utilitaires & Mémoire
 # ==============================================================================
 if 'cahier_memoire' not in st.session_state:
     st.session_state['cahier_memoire'] = {}
@@ -42,20 +37,14 @@ if 'cahier_memoire' not in st.session_state:
 def ajouter_erreur_session(matiere, question, choix_user, bonnes_rep, explication):
     if matiere not in st.session_state['cahier_memoire']:
         st.session_state['cahier_memoire'][matiere] = []
-    
     for err in st.session_state['cahier_memoire'][matiere]:
         if err['question'] == question: return
-
     st.session_state['cahier_memoire'][matiere].append({
-        "date": datetime.now().strftime("%d/%m/%Y"),
-        "question": question,
-        "choix_user": choix_user,
-        "bonnes_rep": bonnes_rep,
-        "explication": explication
+        "date": datetime.now().strftime("%d/%m/%Y"), "question": question,
+        "choix_user": choix_user, "bonnes_rep": bonnes_rep, "explication": explication
     })
 
 def nettoyer_json(texte):
-    """Nettoie les balises markdown que l'IA pourrait rajouter autour du JSON"""
     t = texte.strip()
     t = re.sub(r'^```[a-zA-Z]*\n', '', t)
     t = re.sub(r'^```', '', t)
@@ -64,7 +53,6 @@ def nettoyer_json(texte):
     return t.strip()
 
 def assembler_texte(champ):
-    """Reconstitue les paragraphes rangés dans des listes (Architecture en tiroirs)"""
     if isinstance(champ, list): 
         return '\n\n'.join([str(c) for c in champ])
     return str(champ)
@@ -84,7 +72,7 @@ def lire_word(buffer_fichier):
     return "\n".join([para.text for para in doc.paragraphs])
 
 # ==============================================================================
-# 3. Moteur IA (Le Cœur du Réacteur)
+# 3. Moteur IA (Gemini 2.5 Flash HTTP Direct + Synthèse Exhaustive)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur d'Université expert en LAS 1. 
@@ -99,17 +87,19 @@ NOTES DE L'ÉTUDIANT : "{notes_etudiant}"
 3. Pour la "fiche_synthese" et l'"explication", tu DOIS obligatoirement utiliser une LISTE DE PHRASES (Array) où chaque élément est un paragraphe.
 
 MISSION PÉDAGOGIQUE :
-1. SYNTHÈSE : Rédige un résumé très complet du cours sous forme de liste de paragraphes.
-2. CONCEPTS CLÉS (TOP EXAMEN) : Identifie les concepts, molécules ou lois les plus importants du document (vise entre 10 et 20 concepts vitaux). Explique-les brièvement avec les clés demandées.
+1. SYNTHÈSE (EXHAUSTIVE ET DÉTAILLÉE) : Rédige un résumé très complet et structuré du cours. Ne survole pas le sujet : rentre dans les détails, donne les définitions exactes, explique les mécanismes et les classifications. Chaque paragraphe, titre (###) ou puce importante doit être un élément distinct de la liste JSON.
+2. CONCEPTS CLÉS (TOP EXAMEN) : Identifie les 5 à 10 concepts, molécules ou lois les plus importants du document. Explique-les brièvement.
 3. QCM : Génère EXACTEMENT {nombre_qcm} questions à choix multiples complexes.
 4. CORRECTION DÉTAILLÉE : Sous forme de liste pour chaque proposition (A, B, C, D, E) avec VRAI ou FAUX en gras.
 
 FORMAT JSON STRICT À RESPECTER :
 {{
   "fiche_synthese": [
-    "### Grand Titre",
-    "Premier paragraphe de synthèse...",
-    "Deuxième paragraphe..."
+    "### I. Grand Titre du cours",
+    "**1. Mécanisme principal :** Explication détaillée du processus...",
+    "**2. Définition clé :** Explication de la définition de manière exhaustive...",
+    "### II. Autre Grand Titre",
+    "Détails supplémentaires sur cette partie..."
   ],
   "concepts_cles": [
     {{
@@ -138,26 +128,36 @@ FORMAT JSON STRICT À RESPECTER :
 }}
 """
 
-def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen):
+def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key):
     notes = texte_word if texte_word else 'Aucune note.'
-    style = 'Style ANNALES (Très Difficile, QCM à choix multiples, proposition E Aucune n est exacte).' if est_mode_examen else 'Style APPRENTISSAGE (Direct, clair).'
+    style = 'Style ANNALES (Très Difficile, QCM à choix multiples, prop E).' if est_mode_examen else 'Style APPRENTISSAGE.'
     
     prompt_final = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, notes_etudiant=notes, style_question=style)
-    contenu_requete = f'TEXTE DU COURS OFFICIEL À ANALYSER :\n{texte_pdf}'
     
-    # Utilisation du modèle stable, rapide et avec un grand contexte
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    # 🌟 CONNEXION DIRECTE AU TOUT DERNIER MOTEUR 2.5 FLASH
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
     
-    reponse = model.generate_content(
-        [prompt_final, contenu_requete], 
-        generation_config={
-            'response_mime_type': 'application/json', 
-            'temperature': 0.4
+    headers = {'Content-Type': 'application/json'}
+    payload = {
+        "contents": [{
+            "parts": [{"text": prompt_final + "\n\nTEXTE DU COURS OFFICIEL À ANALYSER :\n" + texte_pdf}]
+        }],
+        "generationConfig": {
+            "temperature": 0.4,
+            "responseMimeType": "application/json"
         }
-    )
+    }
     
-    texte_brut = nettoyer_json(reponse.text)
-    return json.loads(texte_brut, strict=False)
+    reponse = requests.post(url, headers=headers, json=payload)
+    
+    if reponse.status_code != 200:
+        raise Exception(f"Erreur API Google ({reponse.status_code}) : {reponse.text}")
+        
+    data_json = reponse.json()
+    texte_brut = data_json['candidates'][0]['content']['parts'][0]['text']
+    
+    texte_nettoye = nettoyer_json(texte_brut)
+    return json.loads(texte_nettoye, strict=False)
 
 # ==============================================================================
 # 4. Interface Sidebar
@@ -165,7 +165,6 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
 with st.sidebar:
     st.header("⚙️ Configuration")
     api_key = st.text_input("Clé API Gemini :", type="password")
-    if api_key: genai.configure(api_key=api_key)
     st.divider()
     matiere = st.selectbox("Matière :", ["Biologie / Biochimie", "Épidémiologie / Biostats", "Anatomie", "Pharmacologie", "Droit Médical"])
     difficulte = st.slider("Difficulté :", 1, 10, 8)
@@ -175,7 +174,7 @@ with st.sidebar:
 # ==============================================================================
 # 5. Application Principale
 # ==============================================================================
-st.title("🎓 Simulateur LAS 1")
+st.title("🎓 Simulateur LAS 1 (Gemini 2.5)")
 
 c1, c2 = st.columns(2)
 with c1: f_pdf = st.file_uploader("1. PDF du cours", type=['pdf'])
@@ -190,23 +189,23 @@ if f_pdf:
     
     if st.button("🚀 Lancer la génération", type="primary", use_container_width=True):
         if not api_key: 
-            st.error("Clé API manquante ! Rentre ta clé dans le menu de gauche.")
+            st.error("Clé API manquante ! Renseigne-la dans le menu à gauche.")
         else:
-            with st.spinner(f"Analyse chirurgicale de tes cours et extraction des concepts clés..."):
+            with st.spinner(f"Analyse chirurgicale du cours (Génération de la synthèse détaillée en cours)..."):
                 try:
                     texte_cours = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                     t_word = lire_word(f_word) if f_word else ""
                     
-                    st.session_state['data'] = generer_donnees(texte_cours, t_word, matiere, difficulte, nombre_qcm, mode_examen)
+                    st.session_state['data'] = generer_donnees(texte_cours, t_word, matiere, difficulte, nombre_qcm, mode_examen, api_key)
                     st.session_state['examen_soumis'] = False
                     st.rerun()
                 except json.JSONDecodeError as json_err:
-                    st.error(f"⚠️ Erreur de formatage : L'IA a fait une petite faute de syntaxe. Relance simplement la génération !")
+                    st.error(f"⚠️ Erreur de formatage JSON. Relance la génération.")
                 except Exception as e: 
-                    st.error(f"Erreur technique : {e}")
+                    st.error(f"Erreur de communication avec Google : {e}")
 
 # ==============================================================================
-# 6. Affichage Sécurisé
+# 6. Affichage Normal
 # ==============================================================================
 if 'data' in st.session_state:
     data = st.session_state['data']
@@ -243,7 +242,7 @@ if 'data' in st.session_state:
             if mode_examen: st.warning("🚨 **MODE EXAMEN ACTIF** : Coche tes réponses, puis valide ta copie tout en bas pour voir ton score.")
             
             for i, q in enumerate(liste_qcm):
-                st.markdown(f"**Question {i+1}** : {q.get('question', '')}")
+                st.markdown(f"**Question {i+1}** : {q.get('question', '')}", unsafe_allow_html=True)
                 opts = list(q.get('options', {}).items())
                 cols = st.columns(2)
                 if f"choix_{i}" not in st.session_state: st.session_state[f"choix_{i}"] = []
@@ -257,7 +256,7 @@ if 'data' in st.session_state:
                     col_aide1, col_aide2 = st.columns(2)
                     with col_aide1:
                         with st.expander("💡 Besoin d'un indice ?"):
-                            st.write(f"*{q.get('indice', 'Pas d indice disponible.')}*")
+                            st.write(f"*{q.get('indice', 'Pas d indice disponible.')}*", unsafe_allow_html=True)
                     with col_aide2:
                         with st.expander("🧠 Astuce Mnémotechnique"):
                             st.info(q.get('mnemotechnique', 'Pas d astuce disponible.'))
@@ -315,7 +314,8 @@ if 'data' in st.session_state:
             for mat, errs in mem.items():
                 texte_word += f"--- MATIÈRE : {mat} ---\n"
                 for e in errs:
-                    texte_word += f"Date: {e['date']}\nQ: {e['question']}\nMon erreur: {e['choix_user']}\nBonne rep: {e['bonnes_rep']}\nExplication:\n{e['explication']}\n\n"
+                    explication_propre = str(e['explication']).replace('\n', ' ')
+                    texte_word += f"Date: {e['date']}\nQ: {e['question']}\nMon erreur: {e['choix_user']}\nBonne rep: {e['bonnes_rep']}\nExplication:\n{explication_propre}\n\n"
             
             st.download_button("📝 Télécharger pour coller dans Word", texte_word, "mes_erreurs.txt")
             
