@@ -1,11 +1,11 @@
 import streamlit as st
 import fitz  # PyMuPDF
+import google.generativeai as genai
 import json
 import pandas as pd
 import docx
 from datetime import datetime
 import re
-import requests
 
 # ==============================================================================
 # 1. Configuration et Design
@@ -23,6 +23,8 @@ st.markdown("""
     .error-box { background-color: #4a1317; padding: 15px; border-radius: 10px; margin-bottom: 10px; color: #f8d7da; border: 1px solid #f5c6cb;}
     .erreur-log { border-left: 4px solid #ff4b4b; padding: 15px; margin-bottom: 15px; background-color: #2b2b2b; color: #ffffff; border-radius: 5px; border: 1px solid #444; }
     .erreur-log strong { color: #ffffff; }
+    .concept-card { background-color: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 5px solid #007bff; margin-bottom: 10px; color: #333; }
+    .concept-card strong { color: #007bff; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -70,7 +72,7 @@ def lire_word(buffer_fichier):
     return "\n".join([para.text for para in doc.paragraphs])
 
 # ==============================================================================
-# 3. Moteur IA (HTTP Direct avec Gemini 2.5 Flash)
+# 3. Moteur IA (Universel + Concepts Essentiels)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en LAS 1. 
@@ -79,17 +81,23 @@ Matière : {matiere} | Difficulté : {difficulte}/10 | Nombre total de QCM : {no
 STYLE : {style_question}
 NOTES DE L'ÉTUDIANT : "{notes_etudiant}"
 
-⚠️ RÈGLE DE SYNTAXE ABSOLUE : N'utilise JAMAIS de guillemets doubles (") dans tes textes. Utilise des guillemets simples ('). NE FAIS JAMAIS DE RETOURS A LA LIGNE.
+⚠️ RÈGLE DE SYNTAXE ABSOLUE : N'utilise JAMAIS de guillemets doubles (") dans tes textes. Utilise des guillemets simples ('). NE FAIS JAMAIS DE RETOURS A LA LIGNE DANS LE JSON.
 
 MISSION :
 1. SYNTHÈSE : Fais un résumé global du cours (sous forme de liste de paragraphes).
-2. QCM : Génère EXACTEMENT {nombre_qcm} questions à choix multiples.
+2. CONCEPTS CLÉS (LE TOP EXAMEN) : Sélectionne UNIQUEMENT les 5 à 10 concepts les plus "tombables" au concours. Ne fais pas de liste exhaustive. Va à l'essentiel pour économiser la mémoire (1 phrase courte par attribut).
+3. QCM : Génère EXACTEMENT {nombre_qcm} questions à choix multiples.
 
 FORMAT JSON STRICT :
 {{
   "fiche_synthese": [
     "### Titre",
     "Paragraphe 1..."
+  ],
+  "concepts_cles": [
+    {{
+      "nom": "Nom...", "role": "Rôle...", "objectif": "But...", "avec_quoi": "Interactions...", "comment": "Fonctionnement..."
+    }}
   ],
   "qcm": [
     {{
@@ -109,36 +117,23 @@ FORMAT JSON STRICT :
 }}
 """
 
-def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key):
+def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen):
     notes = texte_word if texte_word else 'Aucune note.'
     style = 'Style ANNALES (Très Difficile, QCM à choix multiples, prop E).' if est_mode_examen else 'Style APPRENTISSAGE.'
     
     prompt_final = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, notes_etudiant=notes, style_question=style)
+    contenu_requete = f'TEXTE À ANALYSER :\n{texte_pdf}'
     
-    # URL CORRIGÉE AVEC LE MOT "-flash"
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+    # LE MOTEUR UNIVERSEL (Ne crashe pas sur Streamlit)
+    model = genai.GenerativeModel('gemini-pro')
     
-    headers = {'Content-Type': 'application/json'}
-    payload = {
-        "contents": [{
-            "parts": [{"text": prompt_final + "\n\nTEXTE À ANALYSER :\n" + texte_pdf}]
-        }],
-        "generationConfig": {
-            "temperature": 0.4,
-            "responseMimeType": "application/json"
-        }
-    }
+    reponse = model.generate_content(
+        [prompt_final, contenu_requete], 
+        generation_config={'temperature': 0.4}
+    )
     
-    reponse = requests.post(url, headers=headers, json=payload)
-    
-    if reponse.status_code != 200:
-        raise Exception(f"Erreur API ({reponse.status_code}) : {reponse.text}")
-        
-    data_json = reponse.json()
-    texte_brut = data_json['candidates'][0]['content']['parts'][0]['text']
-    
-    texte_nettoye = nettoyer_json(texte_brut)
-    return json.loads(texte_nettoye, strict=False)
+    texte_brut = nettoyer_json(reponse.text)
+    return json.loads(texte_brut, strict=False)
 
 # ==============================================================================
 # 4. Interface Sidebar
@@ -146,6 +141,7 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
 with st.sidebar:
     st.header("⚙️ Configuration")
     api_key = st.text_input("Clé API Gemini :", type="password")
+    if api_key: genai.configure(api_key=api_key)
     st.divider()
     matiere = st.selectbox("Matière :", ["Biologie / Biochimie", "Épidémiologie / Biostats", "Anatomie", "Pharmacologie", "Droit Médical"])
     difficulte = st.slider("Difficulté :", 1, 10, 8)
@@ -172,16 +168,16 @@ if f_pdf:
         if not api_key: 
             st.error("Clé API manquante !")
         else:
-            with st.spinner(f"Connexion directe à Gemini 2.5 Flash..."):
+            with st.spinner(f"Analyse en cours (Extraction des concepts essentiels)..."):
                 try:
                     texte_cours = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                     t_word = lire_word(f_word) if f_word else ""
                     
-                    st.session_state['data'] = generer_donnees(texte_cours, t_word, matiere, difficulte, nombre_qcm, mode_examen, api_key)
+                    st.session_state['data'] = generer_donnees(texte_cours, t_word, matiere, difficulte, nombre_qcm, mode_examen)
                     st.session_state['examen_soumis'] = False
                     st.rerun()
                 except json.JSONDecodeError as json_err:
-                    st.error(f"⚠️ Erreur de formatage. Essaye de relancer.")
+                    st.error(f"⚠️ Erreur de formatage : {json_err}. Essaye de relancer.")
                 except Exception as e: 
                     st.error(f"Erreur de génération : {e}")
 
@@ -191,14 +187,31 @@ if f_pdf:
 if 'data' in st.session_state:
     data = st.session_state['data']
     liste_qcm = data.get('qcm', [])
+    liste_concepts = data.get('concepts_cles', [])
     
-    t1, t2, t3, t4 = st.tabs(["📖 Fiche", "✍️ QCM", "🗂️ Anki", "📓 Cahier d'Erreurs"])
+    t1, t2, t3, t4, t5 = st.tabs(["📖 Fiche", "🎯 Concepts Clés", "✍️ QCM", "🗂️ Anki", "📓 Cahier d'Erreurs"])
 
     with t1: 
         texte_synthese_propre = assembler_texte(data.get('fiche_synthese', 'Synthèse indisponible.'))
         st.markdown(f"<div class='synth-box'><h3>📌 Synthèse</h3>{texte_synthese_propre}</div>", unsafe_allow_html=True)
 
     with t2:
+        st.subheader(f"🎯 Le Top {len(liste_concepts)} des Concepts Clés")
+        if not liste_concepts:
+            st.info("Aucun concept clé n'a été détecté.")
+        else:
+            for concept in liste_concepts:
+                with st.expander(f"🧩 {concept.get('nom', 'Concept inconnu')}", expanded=False):
+                    st.markdown(f"""
+                    <div class='concept-card'>
+                        <strong>🛠️ Rôle :</strong> {concept.get('role', '')}<br><br>
+                        <strong>🎯 Objectif :</strong> {concept.get('objectif', '')}<br><br>
+                        <strong>🤝 Avec quoi :</strong> {concept.get('avec_quoi', '')}<br><br>
+                        <strong>⚙️ Comment :</strong> {concept.get('comment', '')}
+                    </div>
+                    """, unsafe_allow_html=True)
+
+    with t3:
         if not liste_qcm or len(liste_qcm) == 0:
             st.warning("Aucun QCM n'a pu être généré.")
         
@@ -262,13 +275,13 @@ if 'data' in st.session_state:
             st.metric("Note Finale", f"{(score/len(liste_qcm))*20:.1f} / 20")
             if st.button("Recommencer un test"): st.session_state['examen_soumis'] = False; st.rerun()
 
-    with t3:
+    with t4:
         try:
             anki_df = pd.DataFrame({"Q": [q.get('question', '') for q in liste_qcm], "R": [f"{q.get('reponses_correctes', '')} | {assembler_texte(q.get('explication', '')).replace(chr(10), ' ')}" for q in liste_qcm]})
             st.download_button("📥 Anki CSV", anki_df.to_csv(index=False, sep=";").encode('utf-8'), "anki.csv")
         except: st.error("Export indisponible")
 
-    with t4:
+    with t5:
         st.subheader("📓 Mon Cahier d'Erreurs de la Session")
         mem = st.session_state.get('cahier_memoire', {})
         if not mem: st.info("Aucune erreur enregistrée pour le moment.")
@@ -277,8 +290,7 @@ if 'data' in st.session_state:
             for mat, errs in mem.items():
                 texte_word += f"--- MATIÈRE : {mat} ---\n"
                 for e in errs:
-                    explication_propre = str(e['explication']).replace('\n', ' ')
-                    texte_word += f"Date: {e['date']}\nQ: {e['question']}\nMon erreur: {e['choix_user']}\nBonne rep: {e['bonnes_rep']}\nExplication:\n{explication_propre}\n\n"
+                    texte_word += f"Date: {e['date']}\nQ: {e['question']}\nMon erreur: {e['choix_user']}\nBonne rep: {e['bonnes_rep']}\nExplication:\n{e['explication']}\n\n"
             
             st.download_button("📝 Télécharger pour coller dans Word", texte_word, "mes_erreurs.txt")
             
