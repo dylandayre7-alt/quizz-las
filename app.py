@@ -146,7 +146,7 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     contenu_requete = f'TEXTE DU COURS OFFICIEL À ANALYSER :\n{texte_pdf}'
     
     # Utilisation du modèle stable, rapide et avec un grand contexte
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash')
     
     reponse = model.generate_content(
         [prompt_final, contenu_requete], 
