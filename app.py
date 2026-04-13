@@ -50,8 +50,7 @@ def nettoyer_json(texte):
     t = re.sub(r'^```', '', t)
     t = re.sub(r'\n```$', '', t)
     t = re.sub(r'```$', '', t)
-    # Protection contre les sauts de ligne internes qui font vaciller le JSON
-    t = t.replace('\n', ' ')
+    t = t.replace('\n', ' ') # Antidote contre le bug "Unterminated string"
     return t.strip()
 
 def assembler_texte(champ):
@@ -73,7 +72,7 @@ def lire_word(buffer_fichier):
     return " ".join([para.text for para in doc.paragraphs])
 
 # ==============================================================================
-# 3. Moteur IA (Gemini 2.5 Flash avec Sécurité de Format)
+# 3. Moteur IA (Gemini 2.0 Flash)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en LAS 1. 
@@ -107,8 +106,10 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     }
     
     reponse = requests.post(url, json=payload)
+    
+    # 🌟 L'erreur est maintenant transparente : Google t'affichera son VRAI message
     if reponse.status_code != 200:
-        raise Exception(f"Erreur Google ({reponse.status_code}). Les serveurs sont peut-être saturés.")
+        raise Exception(f"Code {reponse.status_code} provenant de Google : {reponse.text}")
         
     res = reponse.json()
     texte_ia = res['candidates'][0]['content']['parts'][0]['text']
@@ -121,7 +122,7 @@ with st.sidebar:
     st.header("⚙️ Configuration")
     api_key = st.text_input("Clé API Gemini :", type="password")
     st.divider()
-    model_choice = st.radio("Choix du moteur :", ["gemini-2.5-flash", "gemini-1.5-flash"], help="Si le 2.5 sature (erreur 503), passe sur le 1.5.")
+    model_choice = st.radio("Choix du moteur :", ["gemini-2.0-flash", "gemini-1.5-flash"])
     st.divider()
     matiere = st.selectbox("Matière :", ["Biologie / Biochimie", "Épidémiologie / Biostats", "Anatomie", "Pharmacologie", "Droit Médical"])
     difficulte = st.slider("Difficulté :", 1, 10, 8)
@@ -153,7 +154,8 @@ if f_pdf:
                     st.session_state['data'] = generer_donnees(t_pdf, t_word, matiere, difficulte, nombre_qcm, mode_examen, api_key, model_choice)
                     st.session_state['examen_soumis'] = False
                     st.rerun()
-                except Exception as e: st.error(f"Erreur : {e}")
+                except Exception as e: 
+                    st.error(f"Erreur Technique : {e}")
 
 # ==============================================================================
 # 6. Affichage
