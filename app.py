@@ -50,7 +50,7 @@ def nettoyer_json(texte):
     t = re.sub(r'^```', '', t)
     t = re.sub(r'\n```$', '', t)
     t = re.sub(r'```$', '', t)
-    t = t.replace('\n', ' ') # Antidote contre le bug "Unterminated string"
+    t = t.replace('\n', ' ') 
     return t.strip()
 
 def assembler_texte(champ):
@@ -72,7 +72,7 @@ def lire_word(buffer_fichier):
     return " ".join([para.text for para in doc.paragraphs])
 
 # ==============================================================================
-# 3. Moteur IA (Gemini 2.0 Flash)
+# 3. Moteur IA (Le Vieux GEMINI-PRO incassable)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en LAS 1. 
@@ -94,20 +94,22 @@ FORMAT JSON STRICT (SUR UNE SEULE LIGNE) :
 {{"fiche_synthese": ["### Titre<br>Paragraphe..."], "concepts_cles": [{{"nom": "...", "role": "...", "objectif": "...", "avec_quoi": "...", "comment": "..."}}], "qcm": [{{"question": "...", "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}}, "reponses_correctes": ["A"], "explication": ["**A) VRAI** : ...<br>**B) FAUX** : ..."], "indice": "...", "mnemotechnique": "..."}}]}}
 """
 
-def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key, model_name):
+def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key):
     notes = texte_word if texte_word else 'Aucune note.'
     style = 'Style ANNALES (Piégeux, prop E).' if est_mode_examen else 'Style APPRENTISSAGE.'
     prompt_final = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, notes_etudiant=notes, style_question=style)
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+    # 🌟 L'URL ULTIME QUI MARCHE PARTOUT : gemini-pro
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={api_key}"
+    
+    # On retire le "responseMimeType" car l'ancienne API v1beta de gemini-pro ne le supporte pas toujours !
     payload = {
         "contents": [{"parts": [{"text": prompt_final + " TEXTE : " + texte_pdf}]}],
-        "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json"}
+        "generationConfig": {"temperature": 0.3}
     }
     
     reponse = requests.post(url, json=payload)
     
-    # 🌟 L'erreur est maintenant transparente : Google t'affichera son VRAI message
     if reponse.status_code != 200:
         raise Exception(f"Code {reponse.status_code} provenant de Google : {reponse.text}")
         
@@ -121,8 +123,6 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
 with st.sidebar:
     st.header("⚙️ Configuration")
     api_key = st.text_input("Clé API Gemini :", type="password")
-    st.divider()
-    model_choice = st.radio("Choix du moteur :", ["gemini-2.0-flash", "gemini-1.5-flash"])
     st.divider()
     matiere = st.selectbox("Matière :", ["Biologie / Biochimie", "Épidémiologie / Biostats", "Anatomie", "Pharmacologie", "Droit Médical"])
     difficulte = st.slider("Difficulté :", 1, 10, 8)
@@ -147,11 +147,11 @@ if f_pdf:
     if st.button("🚀 Lancer la génération", type="primary", use_container_width=True):
         if not api_key: st.error("Clé API manquante !")
         else:
-            with st.spinner("Analyse chirurgicale en cours..."):
+            with st.spinner("Analyse avec le moteur universel Gemini-Pro..."):
                 try:
                     t_pdf = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                     t_word = lire_word(f_word) if f_word else ""
-                    st.session_state['data'] = generer_donnees(t_pdf, t_word, matiere, difficulte, nombre_qcm, mode_examen, api_key, model_choice)
+                    st.session_state['data'] = generer_donnees(t_pdf, t_word, matiere, difficulte, nombre_qcm, mode_examen, api_key)
                     st.session_state['examen_soumis'] = False
                     st.rerun()
                 except Exception as e: 
