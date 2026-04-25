@@ -18,7 +18,6 @@ st.markdown("""
     .stTabs [data-baseweb="tab"] { height: 50px; background-color: #f0f2f6; border-radius: 10px 10px 0 0; padding: 10px 20px; }
     .stTabs [aria-selected="true"] { background-color: #ff4b4b; color: white; font-weight: bold; }
     
-    /* Design Magistral pour la Fiche Synthèse */
     .synth-box { padding: 30px; background-color: #1e1e1e; color: #ffffff; border-left: 8px solid #ff4b4b; border-radius: 15px; margin-bottom: 30px; line-height: 1.8; }
     .synth-box h1, .synth-box h2 { color: #ff4b4b !important; margin-top: 25px; margin-bottom: 10px; }
     .synth-box h3 { color: #e74c3c !important; font-weight: bold; font-size: 1.4em; margin-top: 20px; border-bottom: 1px solid #444; padding-bottom: 5px; } 
@@ -66,13 +65,11 @@ def nettoyer_json(texte):
     return t.strip()
 
 def assembler_texte_html(champ):
-    """Reconstitue les paragraphes et force la conversion Markdown -> HTML pour éviter les bugs visuels"""
     if isinstance(champ, list): 
         texte = '<br><br>'.join([str(c) for c in champ])
     else:
         texte = str(champ)
         
-    # Bouclier Python : si l'IA utilise quand même ### ou **, on le force en HTML
     texte = re.sub(r'###\s*(.*?)(<br>|$)', r'<h3>\1</h3>\2', texte)
     texte = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', texte)
     return texte
@@ -91,7 +88,7 @@ def lire_word(buffer_fichier):
     return " ".join([para.text for para in doc.paragraphs])
 
 # ==============================================================================
-# 3. Moteur IA (Gemini 2.5 Flash DIRECT - Instruction HTML forcée)
+# 3. Moteur IA (Gemini 2.5 Flash - SANS BRIDES)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur d'Université expert en LAS 1. Ton but est de préparer l'étudiant au concours.
@@ -102,31 +99,27 @@ NOTES DE L'ÉTUDIANT : "{notes_etudiant}"
 
 ⚠️ RÈGLES INFORMATIQUES CRITIQUES :
 1. N'utilise JAMAIS de guillemets doubles (") dans tes textes. Utilise EXCLUSIVEMENT des guillemets simples (').
-2. NE FAIS AUCUN RETOUR À LA LIGNE DANS TES VALEURS JSON. Écris tout ton JSON sur une seule ligne continue.
-3. FORMATAGE VISUEL : N'utilise pas le Markdown (pas de ### ni de **). Utilise EXCLUSIVEMENT du HTML :
+2. FORMATAGE VISUEL : N'utilise pas le Markdown (pas de ### ni de **). Utilise EXCLUSIVEMENT du HTML :
    - Titres : <h3>Titre de la section</h3>
    - Gras : <strong>mot clé</strong>
    - Sauts de ligne : <br>
 
-MISSION PÉDAGOGIQUE :
+MISSION PÉDAGOGIQUE (TU DOIS IMPÉRATIVEMENT REMPLIR LES 3 SECTIONS) :
 1. SYNTHÈSE MASTERCLASS : Rédige un cours magistral exhaustif. 
    - Utilise <h3> pour structurer.
    - Détaille les mécanismes, classifications et définitions.
    - Utilise la couleur rouge pour les concepts vitaux : <span style='color:#ff4b4b'>notion importante</span>.
-   - Utilise <strong> pour les mots-clés.
 
-2. CONCEPTS CLÉS : 5 à 10 concepts majeurs.
+2. CONCEPTS CLÉS : Tu DOIS IMPÉRATIVEMENT générer 5 à 10 concepts majeurs dans la liste "concepts_cles". Ne laisse jamais cette section vide.
 
-3. QCM CONCOURS : Génère EXACTEMENT {nombre_qcm} questions. Varie les bonnes réponses (de 1 à 5).
+3. QCM CONCOURS : Tu DOIS IMPÉRATIVEMENT générer EXACTEMENT {nombre_qcm} questions dans la liste "qcm". Ne laisse jamais cette section vide. Varie les bonnes réponses (de 1 à 5).
+   - CORRECTION ANALYTIQUE : Explique chaque lettre avec VRAI/FAUX en <strong>. N'utilise pas de couleur rouge ici.
 
-4. CORRECTION ANALYTIQUE : Explique chaque lettre avec VRAI/FAUX en <strong>. N'utilise pas de couleur rouge ici.
-
-FORMAT JSON STRICT (UNE SEULE LIGNE) :
+FORMAT JSON STRICT À RESPECTER :
 {{
   "fiche_synthese": [
     "<h3>I. Titre Magistral</h3>",
-    "<strong>Définition :</strong> <span style='color:#ff4b4b'>notion importante</span>...",
-    "Mouvements de <strong>Hémi-cytosol</strong> : ..."
+    "<strong>Définition :</strong> <span style='color:#ff4b4b'>notion importante</span>..."
   ],
   "concepts_cles": [
     {{
@@ -218,7 +211,7 @@ if f_pdf:
         if not api_key: 
             st.error("Clé API manquante !")
         else:
-            with st.spinner(f"Analyse avec Gemini 2.5 Flash en cours..."):
+            with st.spinner(f"Analyse avec Gemini 2.5 Flash en cours (Génération complète)..."):
                 try:
                     texte_cours = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                     t_word = lire_word(f_word) if f_word else ""
