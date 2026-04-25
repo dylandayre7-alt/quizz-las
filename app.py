@@ -78,16 +78,22 @@ MISSION :
 1. SYNTHÈSE MASTERCLASS : Exhaustive, structurée, mots vitaux en rouge (<span style='color:#ff4b4b'>...</span>).
 2. CONCEPTS CLÉS : 5 à 10 fiches réflexes.
 3. QCM : {nombre_qcm} questions, réponses variables (1 à 5).
-4. CORRECTION : Analyse détaillée A-E.
+4. CORRECTION DÉTAILLÉE : Tu DOIS justifier CHAQUE lettre (A, B, C, D, E) individuellement.
 5. AIDE & MÉMO : Fournis un indice subtil et une astuce de mémorisation active pour chaque question.
 
-FORMAT JSON :
+FORMAT JSON STRICT :
 {{
   "fiche_synthese": ["<h3>...</h3>", "..."],
   "concepts_cles": [{{"nom": "...", "role": "...", "objectif": "...", "avec_quoi": "...", "comment": "..."}}],
   "qcm": [{{
     "question": "...", "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
-    "reponses_correctes": ["A"], "explication": ["..."], "indice": "...", "mnemotechnique": "..."
+    "reponses_correctes": ["A", "D"], 
+    "explication": [
+      "<strong>A) VRAI</strong> : explication...",
+      "<strong>B) FAUX</strong> : explication du piège...",
+      "<strong>C) FAUX</strong> : ..."
+    ], 
+    "indice": "...", "mnemotechnique": "..."
   }}]
 }}
 """
@@ -130,7 +136,7 @@ if f_pdf:
     if st.button("🚀 Générer la session", type="primary", use_container_width=True):
         if not api_key: st.error("Clé API manquante !")
         else:
-            with st.spinner("Analyse Masterclass..."):
+            with st.spinner("Analyse Masterclass en cours..."):
                 try:
                     txt = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                     txt_w = lire_word(f_word) if f_word else ""
@@ -167,8 +173,25 @@ if 'data' in st.session_state:
                         with st.expander("💡 Aide (Indice)"): st.info(q.get('indice', 'Pas d indice.'))
                     with col_h2:
                         with st.expander("🧠 Mémorisation Active"): st.warning(f"**Point d'ancrage :** {q.get('mnemotechnique', 'Rappelle-toi du mécanisme principal.')}")
+                    
+                    # Bouton de vérification instantanée restauré
+                    if st.button(f"Vérifier Q{i+1}", key=f"v_{i}"):
+                        bonnes = sorted([str(b).strip() for b in q.get('reponses_correctes', [])])
+                        mes_choix = sorted(cochees)
+                        explication_propre = assembler_texte_html(q.get('explication', ''))
+                        
+                        if mes_choix == bonnes and len(bonnes) > 0: st.success("Vrai !")
+                        else:
+                            st.error(f"Faux ! Rep: {', '.join(bonnes)}")
+                            ajouter_erreur_session(matiere, q.get('question', ''), ", ".join(mes_choix) if mes_choix else "Aucune", ", ".join(bonnes), explication_propre)
+                        
+                        st.success("**Correction détaillée :**")
+                        st.markdown(explication_propre, unsafe_allow_html=True)
+
                 st.divider()
-            if st.button("Valider ma copie", type="primary", use_container_width=True): 
+            
+            texte_btn = "🏁 Valider ma copie" if mode_examen else "✅ Valider et enregistrer mes erreurs"
+            if st.button(texte_btn, type="primary", use_container_width=True): 
                 st.session_state['examen_soumis'] = True
                 st.rerun()
         else:
@@ -178,13 +201,14 @@ if 'data' in st.session_state:
                 mes_choix = sorted(st.session_state.get(f"choix_{i}", []))
                 juste = (mes_choix == bonnes and len(bonnes) > 0)
                 if juste: score += 1
-                else: ajouter_erreur_session(matiere, q.get('question'), ", ".join(mes_choix), ", ".join(bonnes), assembler_texte_html(q.get('explication')))
-                st.markdown(f"<div class='{'correct-box' if juste else 'error-box'}'>Q{i+1} : {'✅' if juste else '❌'}</div>", unsafe_allow_html=True)
+                else: ajouter_erreur_session(matiere, q.get('question'), ", ".join(mes_choix) if mes_choix else "Aucune", ", ".join(bonnes), assembler_texte_html(q.get('explication')))
+                st.markdown(f"<div class='{'correct-box' if juste else 'error-box'}'>Q{i+1} : {'✅' if juste else '❌'} (Rép: {', '.join(bonnes)})</div>", unsafe_allow_html=True)
                 with st.expander("Correction détaillée"): st.markdown(assembler_texte_html(q.get('explication')), unsafe_allow_html=True)
-            st.metric("Note finale", f"{(score/len(liste_qcm))*20:.1f} / 20")
+            st.metric("Note finale", f"{(score/max(1, len(liste_qcm)))*20:.1f} / 20")
+            if st.button("Nouveau test"): st.session_state['examen_soumis'] = False; st.rerun()
 
     with t4:
         for mat, errs in st.session_state.get('cahier_memoire', {}).items():
             with st.expander(f"{mat} ({len(errs)} erreurs)"):
                 for e in reversed(errs):
-                    st.markdown(f"<div class='erreur-log'><strong>{e['question']}</strong><br>Toi : {e['choix_user']} | Vrai : {e['bonnes_rep']}<br><small>{e['explication']}</small></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='erreur-log'><strong>{e['question']}</strong><br>Toi : {e['choix_user']} | Vrai : {e['bonnes_rep']}<br><br><small>{e['explication']}</small></div>", unsafe_allow_html=True)
