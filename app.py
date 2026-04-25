@@ -21,7 +21,7 @@ st.markdown("""
     /* Design Magistral pour la Fiche Synthèse */
     .synth-box { padding: 30px; background-color: #1e1e1e; color: #ffffff; border-left: 8px solid #ff4b4b; border-radius: 15px; margin-bottom: 30px; line-height: 1.8; }
     .synth-box h1, .synth-box h2 { color: #ff4b4b !important; margin-top: 25px; margin-bottom: 10px; }
-    .synth-box h3 { color: #e74c3c !important; font-weight: bold; font-size: 1.3em; margin-top: 15px; } 
+    .synth-box h3 { color: #e74c3c !important; font-weight: bold; font-size: 1.4em; margin-top: 20px; border-bottom: 1px solid #444; padding-bottom: 5px; } 
     .synth-box p, .synth-box li { color: #ffffff !important; font-size: 1.1em; }
     .synth-box ul { margin-left: 20px; }
     
@@ -65,10 +65,17 @@ def nettoyer_json(texte):
     t = re.sub(r'```$', '', t)
     return t.strip()
 
-def assembler_texte(champ):
+def assembler_texte_html(champ):
+    """Reconstitue les paragraphes et force la conversion Markdown -> HTML pour éviter les bugs visuels"""
     if isinstance(champ, list): 
-        return '<br><br>'.join([str(c) for c in champ])
-    return str(champ)
+        texte = '<br><br>'.join([str(c) for c in champ])
+    else:
+        texte = str(champ)
+        
+    # Bouclier Python : si l'IA utilise quand même ### ou **, on le force en HTML
+    texte = re.sub(r'###\s*(.*?)(<br>|$)', r'<h3>\1</h3>\2', texte)
+    texte = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', texte)
+    return texte
 
 def extraire_texte_pdf(buffer_fichier, page_debut, page_fin):
     buffer_fichier.seek(0)
@@ -84,7 +91,7 @@ def lire_word(buffer_fichier):
     return " ".join([para.text for para in doc.paragraphs])
 
 # ==============================================================================
-# 3. Moteur IA (Gemini 2.5 Flash DIRECT)
+# 3. Moteur IA (Gemini 2.5 Flash DIRECT - Instruction HTML forcée)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur d'Université expert en LAS 1. Ton but est de préparer l'étudiant au concours.
@@ -95,28 +102,31 @@ NOTES DE L'ÉTUDIANT : "{notes_etudiant}"
 
 ⚠️ RÈGLES INFORMATIQUES CRITIQUES :
 1. N'utilise JAMAIS de guillemets doubles (") dans tes textes. Utilise EXCLUSIVEMENT des guillemets simples (').
-2. NE FAIS AUCUN RETOUR À LA LIGNE DANS TES VALEURS JSON. Écris tout ton JSON sur une seule ligne géante continue.
-3. Pour sauter une ligne visuellement, utilise la balise <br>.
+2. NE FAIS AUCUN RETOUR À LA LIGNE DANS TES VALEURS JSON. Écris tout ton JSON sur une seule ligne continue.
+3. FORMATAGE VISUEL : N'utilise pas le Markdown (pas de ### ni de **). Utilise EXCLUSIVEMENT du HTML :
+   - Titres : <h3>Titre de la section</h3>
+   - Gras : <strong>mot clé</strong>
+   - Sauts de ligne : <br>
 
-MISSION PÉDAGOGIQUE DE HAUT NIVEAU :
-1. SYNTHÈSE MASTERCLASS ET COLORÉE (EXHAUSTIVE) : Rédige un cours complet et magistral. 
-   - Utilise une structure hiérarchisée avec des titres (### I. , ### II.).
-   - Ne survole aucun point : détaille les mécanismes, les classifications et les définitions précises.
-   - Utilise la couleur rouge pour mettre en évidence les notions les plus importantes en utilisant la syntaxe HTML : <span style='color:red'>notion importante</span>.
-   - Utilise le gras (**) pour les mots-clés essentiels.
+MISSION PÉDAGOGIQUE :
+1. SYNTHÈSE MASTERCLASS : Rédige un cours magistral exhaustif. 
+   - Utilise <h3> pour structurer.
+   - Détaille les mécanismes, classifications et définitions.
+   - Utilise la couleur rouge pour les concepts vitaux : <span style='color:#ff4b4b'>notion importante</span>.
+   - Utilise <strong> pour les mots-clés.
 
-2. CONCEPTS CLÉS (TOP EXAMEN) : Identifie les 5 à 10 concepts, molécules ou lois les plus importants du document. 
+2. CONCEPTS CLÉS : 5 à 10 concepts majeurs.
 
-3. QCM TYPE CONCOURS : Génère EXACTEMENT {nombre_qcm} questions à choix multiples complexes.
-   - Varie IMPÉRATIVEMENT le nombre de bonnes réponses ! Il peut y avoir 1, 2, 3, 4 ou 5 bonnes réponses. 
+3. QCM CONCOURS : Génère EXACTEMENT {nombre_qcm} questions. Varie les bonnes réponses (de 1 à 5).
 
-4. CORRECTION ANALYTIQUE : Sous forme de liste pour chaque proposition (A, B, C, D, E) avec VRAI ou FAUX en gras. N'utilise pas de couleur ici.
+4. CORRECTION ANALYTIQUE : Explique chaque lettre avec VRAI/FAUX en <strong>. N'utilise pas de couleur rouge ici.
 
-FORMAT JSON STRICT (SUR UNE SEULE LIGNE) À RESPECTER :
+FORMAT JSON STRICT (UNE SEULE LIGNE) :
 {{
   "fiche_synthese": [
-    "### I. Titre Magistral<br>**Définition :** <span style='color:red'>notion importante</span>...",
-    "**Mouvements de <span style='color:red'>Hémi-cytosol</span>** : ..."
+    "<h3>I. Titre Magistral</h3>",
+    "<strong>Définition :</strong> <span style='color:#ff4b4b'>notion importante</span>...",
+    "Mouvements de <strong>Hémi-cytosol</strong> : ..."
   ],
   "concepts_cles": [
     {{
@@ -130,8 +140,8 @@ FORMAT JSON STRICT (SUR UNE SEULE LIGNE) À RESPECTER :
       "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
       "reponses_correctes": ["A", "C"],
       "explication": [
-        "**A) VRAI** : explication...",
-        "**B) FAUX** : explication du piège..."
+        "<strong>A) VRAI</strong> : explication...",
+        "<strong>B) FAUX</strong> : explication du piège..."
       ],
       "source_cours": "Source...",
       "indice": "Indice...",
@@ -147,7 +157,6 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     
     prompt_final = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, notes_etudiant=notes, style_question=style)
     
-    # 🌟 LE MOTEUR 2.5 EST VERROUILLÉ ICI 🌟
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
     
     headers = {'Content-Type': 'application/json'}
@@ -231,7 +240,7 @@ if 'data' in st.session_state:
     t1, t2, t3, t4, t5 = st.tabs(["📖 Fiche Magistrale", "🎯 Concepts Clés", "✍️ QCM", "🗂️ Anki", "📓 Cahier d'Erreurs"])
 
     with t1: 
-        texte_synthese_propre = assembler_texte(data.get('fiche_synthese', 'Synthèse indisponible.'))
+        texte_synthese_propre = assembler_texte_html(data.get('fiche_synthese', 'Synthèse indisponible.'))
         st.markdown(f"<div class='synth-box'>{texte_synthese_propre}</div>", unsafe_allow_html=True)
 
     with t2:
@@ -274,7 +283,7 @@ if 'data' in st.session_state:
             for i, q in enumerate(liste_qcm):
                 bonnes = sorted([str(b).strip() for b in q.get('reponses_correctes', [])])
                 mes_choix = sorted(st.session_state.get(f"choix_{i}", []))
-                explication_propre = assembler_texte(q.get('explication', ''))
+                explication_propre = assembler_texte_html(q.get('explication', ''))
                 juste = (mes_choix == bonnes and len(bonnes) > 0)
                 
                 if juste: score += 1
@@ -290,7 +299,7 @@ if 'data' in st.session_state:
 
     with t4:
         try:
-            anki_df = pd.DataFrame({"Q": [q.get('question', '') for q in liste_qcm], "R": [f"{q.get('reponses_correctes', '')} | {assembler_texte(q.get('explication', '')).replace(chr(10), ' ')}" for q in liste_qcm]})
+            anki_df = pd.DataFrame({"Q": [q.get('question', '') for q in liste_qcm], "R": [f"{q.get('reponses_correctes', '')} | {assembler_texte_html(q.get('explication', '')).replace(chr(10), ' ')}" for q in liste_qcm]})
             st.download_button("📥 Anki CSV", anki_df.to_csv(index=False, sep=";").encode('utf-8'), "anki.csv")
         except: st.error("Export indisponible")
 
