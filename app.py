@@ -63,7 +63,7 @@ def lire_word(buffer_fichier):
     return " ".join([para.text for para in doc.paragraphs])
 
 # ==============================================================================
-# 3. Moteur IA (Format JSON Sécurisé)
+# 3. Moteur IA (Optimisé pour ne plus couper la réponse)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en LAS 1.
@@ -75,7 +75,7 @@ RÈGLES DE FORMATAGE (CRITIQUE) :
 3. Utilise le HTML pour la mise en forme (<h3>, <strong>, <br>). Ne mets pas de Markdown.
 
 MISSION :
-1. COURS COMPLET ET DÉTAILLÉ : Explique les mécanismes et définitions en profondeur. Ne survole rien. Structure avec <h3> et mets les concepts vitaux en rouge (<span style='color:#ff4b4b'>...</span>).
+1. COURS EXHAUSTIF MAIS OPTIMISÉ : Retranscris tous les mécanismes, classifications et définitions importantes. Sois très précis sur le fond, mais va à l'essentiel dans tes phrases pour que ta réponse ne soit pas coupée par manque de mémoire (privilégie les listes à puces et phrases courtes). Structure avec <h3> et mets les concepts vitaux en rouge (<span style='color:#ff4b4b'>...</span>).
 2. CONCEPTS CLÉS : 5 à 10 fiches réflexes indispensables.
 3. QCM : {nombre_qcm} questions type concours, réponses variables (1 à 5).
 4. CORRECTION DÉTAILLÉE : Justifie CHAQUE lettre (A, B, C, D, E) individuellement.
@@ -83,7 +83,7 @@ MISSION :
 
 FORMAT JSON STRICT :
 {{
-  "fiche_synthese": ["<h3>...</h3>", "Explication détaillée..."],
+  "fiche_synthese": ["<h3>...</h3>", "Explication détaillée mais directe..."],
   "concepts_cles": [{{"nom": "...", "role": "...", "objectif": "...", "avec_quoi": "...", "comment": "..."}}],
   "qcm": [{{
     "question": "...", "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
@@ -116,15 +116,16 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     
     texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text'].strip()
     
-    # Nettoyage des balises markdown si l'IA en rajoute autour du JSON
-    texte_ia = re.sub(r'^```[a-zA-Z]*\n', '', texte_ia)
-    texte_ia = re.sub(r'```$', '', texte_ia)
+    # 🌟 EXTRACTION CHIRURGICALE : On isole uniquement ce qui est entre { et }
+    debut = texte_ia.find('{')
+    fin = texte_ia.rfind('}') + 1
+    if debut != -1 and fin != 0:
+        texte_ia = texte_ia[debut:fin]
     
     try:
-        # strict=False permet de ne pas planter sur de petits défauts de l'IA (comme des sauts de ligne internes)
         return json.loads(texte_ia, strict=False)
     except json.JSONDecodeError as e:
-        raise Exception("Le cours généré était trop massif et a été coupé. Relance le bouton pour un nouvel essai !")
+        raise Exception(f"Le cours généré était trop massif et a été coupé. Essaie de sélectionner moins de pages d'un coup (ex: 2 ou 3 pages) ! Détail: {e}")
 
 # ==============================================================================
 # 4. Interface Sidebar
@@ -150,6 +151,9 @@ if f_pdf:
     doc_t = fitz.open(stream=f_pdf.read(), filetype="pdf")
     p_tot = len(doc_t)
     doc_t.close()
+    
+    # Conseil d'utilisation affiché
+    st.info("💡 Si ton cours est très dense, analyse 3 à 5 pages maximum par session pour garantir une fiche ultra-détaillée.")
     p_deb, p_fin = st.slider("Pages :", 1, p_tot, (1, p_tot))
     
     if st.button("🚀 Générer la session", type="primary", use_container_width=True):
