@@ -63,35 +63,34 @@ def lire_word(buffer_fichier):
     return " ".join([para.text for para in doc.paragraphs])
 
 # ==============================================================================
-# 3. Moteur IA (Débridé pour un maximum de détails)
+# 3. Moteur IA (Format JSON Sécurisé)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en LAS 1.
 Matière : {matiere} | Difficulté : {difficulte}/10 | QCM : {nombre_qcm}
 
-RÈGLES :
-1. Pas de guillemets doubles (").
-2. Pas de retour à la ligne dans le JSON.
-3. Utilise le HTML (<h3>, <strong>, <br>).
+RÈGLES DE FORMATAGE (CRITIQUE) :
+1. Réponds UNIQUEMENT avec un objet JSON valide.
+2. Échappe proprement les guillemets internes ou utilise des guillemets simples (') dans le texte.
+3. Utilise le HTML pour la mise en forme (<h3>, <strong>, <br>). Ne mets pas de Markdown.
 
 MISSION :
-1. COURS COMPLET ET DÉTAILLÉ (INTERDICTION DE RÉSUMER) : Tu dois EXPLIQUER en profondeur. Retranscris chaque mécanisme, chaque exception, chaque classification et chaque définition présents dans le document. Si le texte d'origine est long, ton cours doit être EXTRÊMEMENT LONG et détaillé. Ne raccourcis rien. Structure avec <h3> et mets les concepts vitaux en rouge (<span style='color:#ff4b4b'>...</span>).
-2. CONCEPTS CLÉS : 5 à 10 fiches réflexes.
-3. QCM : {nombre_qcm} questions, réponses variables (1 à 5).
-4. CORRECTION DÉTAILLÉE : Tu DOIS justifier CHAQUE lettre (A, B, C, D, E) individuellement.
-5. AIDE & MÉMO : Fournis un indice subtil et une astuce de mémorisation active pour chaque question.
+1. COURS COMPLET ET DÉTAILLÉ : Explique les mécanismes et définitions en profondeur. Ne survole rien. Structure avec <h3> et mets les concepts vitaux en rouge (<span style='color:#ff4b4b'>...</span>).
+2. CONCEPTS CLÉS : 5 à 10 fiches réflexes indispensables.
+3. QCM : {nombre_qcm} questions type concours, réponses variables (1 à 5).
+4. CORRECTION DÉTAILLÉE : Justifie CHAQUE lettre (A, B, C, D, E) individuellement.
+5. AIDE & MÉMO : Un indice et une astuce de mémorisation par question.
 
 FORMAT JSON STRICT :
 {{
-  "fiche_synthese": ["<h3>...</h3>", "Explication extrêmement détaillée..."],
+  "fiche_synthese": ["<h3>...</h3>", "Explication détaillée..."],
   "concepts_cles": [{{"nom": "...", "role": "...", "objectif": "...", "avec_quoi": "...", "comment": "..."}}],
   "qcm": [{{
     "question": "...", "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
     "reponses_correctes": ["A", "D"], 
     "explication": [
       "<strong>A) VRAI</strong> : explication...",
-      "<strong>B) FAUX</strong> : explication du piège...",
-      "<strong>C) FAUX</strong> : ..."
+      "<strong>B) FAUX</strong> : explication du piège..."
     ], 
     "indice": "...", "mnemotechnique": "..."
   }}]
@@ -103,7 +102,6 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, notes_etudiant=texte_word or 'Aucune', style_question=style)
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
     
-    # 🌟 LE ROBINET EST OUVERT AU MAXIMUM ICI (maxOutputTokens: 8192) 🌟
     payload = {
         "contents": [{"parts": [{"text": prompt + "\nCOURS :\n" + texte_pdf}]}], 
         "generationConfig": {
@@ -115,7 +113,18 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     
     rep = requests.post(url, json=payload)
     if rep.status_code != 200: raise Exception(f"Erreur Google : {rep.text}")
-    return json.loads(rep.json()['candidates'][0]['content']['parts'][0]['text'].strip().replace('\n', ' '))
+    
+    texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+    
+    # Nettoyage des balises markdown si l'IA en rajoute autour du JSON
+    texte_ia = re.sub(r'^```[a-zA-Z]*\n', '', texte_ia)
+    texte_ia = re.sub(r'```$', '', texte_ia)
+    
+    try:
+        # strict=False permet de ne pas planter sur de petits défauts de l'IA (comme des sauts de ligne internes)
+        return json.loads(texte_ia, strict=False)
+    except json.JSONDecodeError as e:
+        raise Exception("Le cours généré était trop massif et a été coupé. Relance le bouton pour un nouvel essai !")
 
 # ==============================================================================
 # 4. Interface Sidebar
@@ -146,7 +155,7 @@ if f_pdf:
     if st.button("🚀 Générer la session", type="primary", use_container_width=True):
         if not api_key: st.error("Clé API manquante !")
         else:
-            with st.spinner("Rédaction du cours complet en cours (cela peut prendre un peu plus de temps)..."):
+            with st.spinner("Rédaction du cours complet en cours (avec Gemini 2.5)..."):
                 try:
                     txt = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                     txt_w = lire_word(f_word) if f_word else ""
