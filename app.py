@@ -63,7 +63,7 @@ def lire_word(buffer_fichier):
     return " ".join([para.text for para in doc.paragraphs])
 
 # ==============================================================================
-# 3. Moteur IA
+# 3. Moteur IA (Débridé pour un maximum de détails)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en LAS 1.
@@ -75,7 +75,7 @@ RÈGLES :
 3. Utilise le HTML (<h3>, <strong>, <br>).
 
 MISSION :
-1. SYNTHÈSE MASTERCLASS : Exhaustive, structurée, mots vitaux en rouge (<span style='color:#ff4b4b'>...</span>).
+1. COURS COMPLET ET DÉTAILLÉ (INTERDICTION DE RÉSUMER) : Tu dois EXPLIQUER en profondeur. Retranscris chaque mécanisme, chaque exception, chaque classification et chaque définition présents dans le document. Si le texte d'origine est long, ton cours doit être EXTRÊMEMENT LONG et détaillé. Ne raccourcis rien. Structure avec <h3> et mets les concepts vitaux en rouge (<span style='color:#ff4b4b'>...</span>).
 2. CONCEPTS CLÉS : 5 à 10 fiches réflexes.
 3. QCM : {nombre_qcm} questions, réponses variables (1 à 5).
 4. CORRECTION DÉTAILLÉE : Tu DOIS justifier CHAQUE lettre (A, B, C, D, E) individuellement.
@@ -83,7 +83,7 @@ MISSION :
 
 FORMAT JSON STRICT :
 {{
-  "fiche_synthese": ["<h3>...</h3>", "..."],
+  "fiche_synthese": ["<h3>...</h3>", "Explication extrêmement détaillée..."],
   "concepts_cles": [{{"nom": "...", "role": "...", "objectif": "...", "avec_quoi": "...", "comment": "..."}}],
   "qcm": [{{
     "question": "...", "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
@@ -102,7 +102,17 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     style = 'ANNALES' if est_mode_examen else 'APPRENTISSAGE'
     prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, notes_etudiant=texte_word or 'Aucune', style_question=style)
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-    payload = {"contents": [{"parts": [{"text": prompt + "\nCOURS :\n" + texte_pdf}]}], "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json"}}
+    
+    # 🌟 LE ROBINET EST OUVERT AU MAXIMUM ICI (maxOutputTokens: 8192) 🌟
+    payload = {
+        "contents": [{"parts": [{"text": prompt + "\nCOURS :\n" + texte_pdf}]}], 
+        "generationConfig": {
+            "temperature": 0.3, 
+            "maxOutputTokens": 8192,
+            "responseMimeType": "application/json"
+        }
+    }
+    
     rep = requests.post(url, json=payload)
     if rep.status_code != 200: raise Exception(f"Erreur Google : {rep.text}")
     return json.loads(rep.json()['candidates'][0]['content']['parts'][0]['text'].strip().replace('\n', ' '))
@@ -136,7 +146,7 @@ if f_pdf:
     if st.button("🚀 Générer la session", type="primary", use_container_width=True):
         if not api_key: st.error("Clé API manquante !")
         else:
-            with st.spinner("Analyse Masterclass en cours..."):
+            with st.spinner("Rédaction du cours complet en cours (cela peut prendre un peu plus de temps)..."):
                 try:
                     txt = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                     txt_w = lire_word(f_word) if f_word else ""
@@ -174,7 +184,6 @@ if 'data' in st.session_state:
                     with col_h2:
                         with st.expander("🧠 Mémorisation Active"): st.warning(f"**Point d'ancrage :** {q.get('mnemotechnique', 'Rappelle-toi du mécanisme principal.')}")
                     
-                    # Bouton de vérification instantanée restauré
                     if st.button(f"Vérifier Q{i+1}", key=f"v_{i}"):
                         bonnes = sorted([str(b).strip() for b in q.get('reponses_correctes', [])])
                         mes_choix = sorted(cochees)
