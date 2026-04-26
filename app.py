@@ -6,8 +6,6 @@ import docx
 from datetime import datetime
 import re
 import requests
-import math
-import time
 
 # ==============================================================================
 # 1. Configuration et Design Premium
@@ -65,34 +63,35 @@ def lire_word(buffer_fichier):
     return " ".join([para.text for para in doc.paragraphs])
 
 # ==============================================================================
-# 3. Moteur IA 
+# 3. Moteur IA
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en LAS 1.
-Matière : {matiere} | Difficulté : {difficulte}/10 | QCM à faire pour ce passage : {nombre_qcm}
+Matière : {matiere} | Difficulté : {difficulte}/10 | QCM : {nombre_qcm}
 
-RÈGLES DE FORMATAGE (CRITIQUE) :
-1. Réponds UNIQUEMENT avec un objet JSON valide.
-2. Échappe proprement les guillemets internes ou utilise des guillemets simples (') dans le texte.
-3. Utilise le HTML pour la mise en forme (<h3>, <strong>, <br>). Ne mets pas de Markdown.
+RÈGLES :
+1. Pas de guillemets doubles (").
+2. Pas de retour à la ligne dans le JSON.
+3. Utilise le HTML (<h3>, <strong>, <br>).
 
-MISSION SUR CET EXTRAIT :
-1. COURS EXHAUSTIF : Retranscris tous les mécanismes, classifications et définitions importantes. Sois très précis. Structure avec <h3> et mets les concepts vitaux en rouge (<span style='color:#ff4b4b'>...</span>).
-2. CONCEPTS CLÉS : Fiches réflexes indispensables (max 5 pour cet extrait).
-3. QCM : EXACTEMENT {nombre_qcm} questions type concours, réponses variables (1 à 5).
-4. CORRECTION DÉTAILLÉE : Justifie CHAQUE lettre (A, B, C, D, E) individuellement.
-5. AIDE & MÉMO : Un indice et une astuce de mémorisation par question.
+MISSION :
+1. SYNTHÈSE MASTERCLASS : Exhaustive, structurée, mots vitaux en rouge (<span style='color:#ff4b4b'>...</span>).
+2. CONCEPTS CLÉS : 5 à 10 fiches réflexes.
+3. QCM : {nombre_qcm} questions, réponses variables (1 à 5).
+4. CORRECTION DÉTAILLÉE : Tu DOIS justifier CHAQUE lettre (A, B, C, D, E) individuellement.
+5. AIDE & MÉMO : Fournis un indice subtil et une astuce de mémorisation active pour chaque question.
 
 FORMAT JSON STRICT :
 {{
-  "fiche_synthese": ["<h3>...</h3>", "Explication détaillée..."],
+  "fiche_synthese": ["<h3>...</h3>", "..."],
   "concepts_cles": [{{"nom": "...", "role": "...", "objectif": "...", "avec_quoi": "...", "comment": "..."}}],
   "qcm": [{{
     "question": "...", "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
     "reponses_correctes": ["A", "D"], 
     "explication": [
       "<strong>A) VRAI</strong> : explication...",
-      "<strong>B) FAUX</strong> : explication du piège..."
+      "<strong>B) FAUX</strong> : explication du piège...",
+      "<strong>C) FAUX</strong> : ..."
     ], 
     "indice": "...", "mnemotechnique": "..."
   }}]
@@ -103,27 +102,10 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     style = 'ANNALES' if est_mode_examen else 'APPRENTISSAGE'
     prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nombre_qcm=nombre_qcm, notes_etudiant=texte_word or 'Aucune', style_question=style)
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-    
-    payload = {
-        "contents": [{"parts": [{"text": prompt + "\nCOURS :\n" + texte_pdf}]}], 
-        "generationConfig": {
-            "temperature": 0.3, 
-            "maxOutputTokens": 8192,
-            "responseMimeType": "application/json"
-        }
-    }
-    
+    payload = {"contents": [{"parts": [{"text": prompt + "\nCOURS :\n" + texte_pdf}]}], "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json"}}
     rep = requests.post(url, json=payload)
     if rep.status_code != 200: raise Exception(f"Erreur Google : {rep.text}")
-    
-    texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text'].strip()
-    
-    debut = texte_ia.find('{')
-    fin = texte_ia.rfind('}') + 1
-    if debut != -1 and fin != 0:
-        texte_ia = texte_ia[debut:fin]
-    
-    return json.loads(texte_ia, strict=False)
+    return json.loads(rep.json()['candidates'][0]['content']['parts'][0]['text'].strip().replace('\n', ' '))
 
 # ==============================================================================
 # 4. Interface Sidebar
@@ -133,13 +115,13 @@ with st.sidebar:
     api_key = st.text_input("Clé API Gemini :", type="password")
     matiere = st.selectbox("Matière :", ["Biologie / Biochimie", "Biostats", "Anatomie", "Pharmacologie", "Droit Médical"])
     difficulte = st.slider("Difficulté :", 1, 10, 8)
-    nombre_qcm_total = st.number_input("Nombre TOTAL de QCM souhaité :", 1, 50, 10)
+    nombre_qcm = st.number_input("Nombre de questions :", 1, 30, 10)
     mode_examen = st.toggle("🚨 Activer le Mode Examen")
 
 # ==============================================================================
 # 5. Application
 # ==============================================================================
-st.title("🎓 Simulateur LAS 1 (Mode Tank 🛡️)")
+st.title("🎓 Simulateur LAS 1 Masterclass")
 
 c1, c2 = st.columns(2)
 with c1: f_pdf = st.file_uploader("1. PDF du cours", type=['pdf'])
@@ -150,68 +132,21 @@ if f_pdf:
     p_tot = len(doc_t)
     doc_t.close()
     
-    p_deb, p_fin = st.slider("Pages à analyser :", 1, p_tot, (1, p_tot))
+    st.info("💡 Sélectionne par tranches (ex: 3 à 5 pages max) pour que l'IA ne sature pas sa mémoire.")
+    p_deb, p_fin = st.slider("Pages :", 1, p_tot, (1, p_tot))
     
-    if st.button("🚀 Lancer l'Analyse Massive", type="primary", use_container_width=True):
+    if st.button("🚀 Générer la session", type="primary", use_container_width=True):
         if not api_key: st.error("Clé API manquante !")
         else:
-            # === LE MOTEUR DE DÉCOUPAGE AUTOMATIQUE ===
-            PAGES_PAR_LOT = 4 # Sécurité max pour éviter les coupures de l'IA
-            total_pages = p_fin - p_deb + 1
-            total_lots = math.ceil(total_pages / PAGES_PAR_LOT)
-            
-            all_synthese = []
-            all_concepts = []
-            all_qcm = []
-            
-            # On calcule combien de QCM on demande par petit lot pour atteindre le total souhaité
-            qcm_par_lot = max(1, nombre_qcm_total // total_lots)
-            
-            with st.status(f"🤖 Analyse blindée en cours ({total_lots} étapes)...", expanded=True) as status:
-                txt_w = lire_word(f_word) if f_word else ""
-                lots_reussis = 0
-                
-                for i in range(total_lots):
-                    start_p = p_deb + i * PAGES_PAR_LOT
-                    end_p = min(start_p + PAGES_PAR_LOT - 1, p_fin)
-                    
-                    st.write(f"⏳ Lecture et synthèse des pages {start_p} à {end_p}...")
-                    txt_chunk = extraire_texte_pdf(f_pdf, start_p, end_p)
-                    
-                    try:
-                        # On demande à l'IA d'analyser juste ce petit bout
-                        chunk_data = generer_donnees(txt_chunk, txt_w, matiere, difficulte, qcm_par_lot, mode_examen, api_key)
-                        
-                        # On ajoute les résultats dans le grand sac
-                        all_synthese.extend(chunk_data.get('fiche_synthese', []))
-                        all_concepts.extend(chunk_data.get('concepts_cles', []))
-                        all_qcm.extend(chunk_data.get('qcm', []))
-                        lots_reussis += 1
-                        
-                    except Exception as e:
-                        # LE BOUCLIER : Si un lot plante, on l'ignore au lieu de tout crasher
-                        st.warning(f"⚠️ Un passage trop complexe (pages {start_p}-{end_p}) a été ignoré pour éviter un crash.")
-                    
-                    # On fait souffler le serveur de Google pour ne pas se faire bannir
-                    if i < total_lots - 1:
-                        time.sleep(5) 
-                        
-                if lots_reussis > 0:
-                    st.session_state['data'] = {
-                        "fiche_synthese": all_synthese,
-                        "concepts_cles": all_concepts,
-                        "qcm": all_qcm
-                    }
+            with st.spinner("Analyse Masterclass en cours..."):
+                try:
+                    txt = extraire_texte_pdf(f_pdf, p_deb, p_fin)
+                    txt_w = lire_word(f_word) if f_word else ""
+                    st.session_state['data'] = generer_donnees(txt, txt_w, matiere, difficulte, nombre_qcm, mode_examen, api_key)
                     st.session_state['examen_soumis'] = False
-                    status.update(label=f"✅ {lots_reussis}/{total_lots} lots traités avec succès !", state="complete", expanded=False)
                     st.rerun()
-                else:
-                    status.update(label="❌ Échec total", state="error")
-                    st.error("L'IA n'a réussi à formater aucune des pages. Le cours est peut-être composé uniquement d'images impossibles à lire.")
+                except Exception as e: st.error(f"❌ {e}")
 
-# ==============================================================================
-# 6. Affichage des résultats
-# ==============================================================================
 if 'data' in st.session_state:
     data = st.session_state['data']
     t1, t2, t3, t4 = st.tabs(["📖 Fiche Magistrale", "🎯 Concepts Clés", "✍️ QCM", "📓 Cahier d'Erreurs"])
