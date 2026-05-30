@@ -52,6 +52,14 @@ def assembler_texte_html(champ):
     texte = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', texte)
     return texte
 
+def nettoyer_question(texte):
+    """ Filtre radical pour empêcher les balises HTML d'apparaître dans les questions """
+    t = str(texte)
+    t = re.sub(r'</?h[1-6]>', '', t) # Supprime les <h3>, </h1> etc.
+    t = t.replace('<br>', ' ')
+    t = t.replace('<strong>', '**').replace('</strong>', '**')
+    return t.strip()
+
 def extraire_texte_pdf(buffer_fichier, page_debut, page_fin):
     buffer_fichier.seek(0)
     doc = fitz.open(stream=buffer_fichier.read(), filetype="pdf")
@@ -64,17 +72,13 @@ def lire_word(buffer_fichier):
     return " ".join([para.text for para in doc.paragraphs])
 
 def sauvetage_json_coupe(texte_ia):
-    """ LE BOUCLIER ABSOLU : Si l'IA est coupée par manque de mémoire, cette fonction répare le code en direct """
     texte_propre = texte_ia.strip()
     texte_propre = re.sub(r'^```[a-zA-Z]*\n', '', texte_propre)
     texte_propre = re.sub(r'```$', '', texte_propre).strip()
     
     try:
-        # Essai normal
         return json.loads(texte_propre, strict=False)
     except json.JSONDecodeError:
-        # L'IA a été coupée ! On active le mode réparation.
-        # On ajoute les guillemets et crochets manquants pour fermer la synthèse.
         if texte_propre.count('"') % 2 != 0:
             texte_propre += '"'
             
@@ -87,7 +91,6 @@ def sauvetage_json_coupe(texte_ia):
             except:
                 pass
                 
-        # Si ça plante vraiment (très rare), on coupe à la hache au dernier paragraphe valide
         coupe = texte_propre.rfind('","')
         if coupe != -1:
             try:
@@ -110,29 +113,30 @@ Tu dois générer EXACTEMENT {nb_qcu} QCU (Choix Unique) et EXACTEMENT {nb_ouver
 RÈGLES DE FORMATAGE (CRITIQUE) :
 1. Réponds UNIQUEMENT avec un objet JSON valide.
 2. Échappe proprement les guillemets internes ou utilise des guillemets simples (').
-3. Utilise le HTML (<h3>, <strong>, <br>). Ne mets pas de Markdown.
+3. Utilise le HTML (<h3>, <strong>, <br>) EXCLUSIVEMENT pour la "fiche_synthese" et l'"explication".
+4. N'UTILISE JAMAIS AUCUNE BALISE HTML DANS LES CHAMPS "question" ET "options". Que du texte brut.
 
 MISSION (DANS CET ORDRE PRÉCIS POUR SÉCURISER LA MÉMOIRE) :
 1. QUESTIONS MIXTES : Fais-les en premier. 
    - QCU : 5 propositions, UNE SEULE bonne réponse possible.
    - OUVERTE : Question de réflexion, donne la réponse attendue et 3 à 5 mots-clés.
 2. CONCEPTS CLÉS : 5 fiches réflexes indispensables.
-3. COURS EXHAUSTIF (SYNTHÈSE) : Fais-le EN DERNIER. Retranscris tous les mécanismes. Privilégie les listes à puces pour gagner de la place. Structure avec <h3> et mots vitaux en rouge <span style='color:#ff4b4b'>...</span>.
+3. COURS EXHAUSTIF (SYNTHÈSE) : Fais-le EN DERNIER. Retranscris tous les mécanismes. Privilégie les listes à puces. Structure avec <h3> et mots vitaux en rouge <span style='color:#ff4b4b'>...</span>.
 
 FORMAT JSON STRICT (RESPECTE L'ORDRE) :
 {{
   "questions": [
     {{
       "type": "QCU",
-      "question": "...",
-      "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
+      "question": "Texte brut SANS balise HTML",
+      "options": {{"A": "Texte brut", "B": "Texte brut", "C": "Texte brut", "D": "Texte brut", "E": "Texte brut"}},
       "reponse_correcte": "A", 
       "explication": ["<strong>A) VRAI</strong> : ...", "<strong>B) FAUX</strong> : ..."], 
       "indice": "...", "mnemotechnique": "..."
     }},
     {{
       "type": "OUVERTE",
-      "question": "...",
+      "question": "Texte brut de la question",
       "reponse_attendue": "...",
       "mots_cles": ["mot1", "mot2", "mot3"],
       "explication": ["..."],
@@ -145,7 +149,6 @@ FORMAT JSON STRICT (RESPECTE L'ORDRE) :
 """
 
 def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key):
-    # Calcul du ratio 80% QCU / 20% Ouvertes
     nb_qcu = max(1, round(nombre_qcm * 0.8))
     nb_ouverte = max(1, nombre_qcm - nb_qcu)
     
@@ -166,7 +169,6 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     
     texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text']
     
-    # On passe le texte brut dans notre bouclier anti-crash
     return sauvetage_json_coupe(texte_ia)
 
 # ==============================================================================
@@ -226,7 +228,10 @@ if 'data' in st.session_state:
         if not st.session_state.get('examen_soumis'):
             for i, q in enumerate(liste_questions):
                 type_q = q.get('type', 'QCU')
-                st.markdown(f"**Question {i+1}** 🔹 *{type_q}* : {q.get('question')}")
+                # NETTOYAGE AUTO DE LA QUESTION ICI
+                question_propre = nettoyer_question(q.get('question', ''))
+                
+                st.markdown(f"**Question {i+1}** 🔹 *{type_q}* : {question_propre}", unsafe_allow_html=True)
                 
                 # Interface QCU (Boutons Radio)
                 if type_q == "QCU":
@@ -234,7 +239,7 @@ if 'data' in st.session_state:
                     choix = st.radio(
                         "Choisis la bonne proposition :", 
                         options=list(opts.keys()), 
-                        format_func=lambda x: f"{x}. {opts[x]}",
+                        format_func=lambda x: f"{x}. {nettoyer_question(opts[x])}",
                         index=None,
                         key=f"qcu_{i}"
                     )
@@ -248,9 +253,9 @@ if 'data' in st.session_state:
                 if not mode_examen:
                     col_h1, col_h2 = st.columns(2)
                     with col_h1:
-                        with st.expander("💡 Aide (Indice)"): st.info(q.get('indice', 'Pas d indice.'))
+                        with st.expander("💡 Aide (Indice)"): st.info(nettoyer_question(q.get('indice', 'Pas d indice.')))
                     with col_h2:
-                        with st.expander("🧠 Mémorisation Active"): st.warning(f"**Point d'ancrage :** {q.get('mnemotechnique', '')}")
+                        with st.expander("🧠 Mémorisation Active"): st.warning(f"**Point d'ancrage :** {nettoyer_question(q.get('mnemotechnique', ''))}")
                 
                 st.divider()
             
@@ -267,6 +272,7 @@ if 'data' in st.session_state:
             for i, q in enumerate(liste_questions):
                 type_q = q.get('type', 'QCU')
                 mon_choix = st.session_state.get(f"choix_{i}")
+                question_propre = nettoyer_question(q.get('question', ''))
                 
                 # Correction QCU
                 if type_q == "QCU":
@@ -275,9 +281,9 @@ if 'data' in st.session_state:
                     juste = (mon_choix == bonne_rep and mon_choix is not None)
                     
                     if juste: score_qcu += 1
-                    else: ajouter_erreur_session(matiere, q.get('question'), str(mon_choix), bonne_rep, assembler_texte_html(q.get('explication')))
+                    else: ajouter_erreur_session(matiere, question_propre, str(mon_choix), bonne_rep, assembler_texte_html(q.get('explication')))
                     
-                    st.markdown(f"<div class='{'correct-box' if juste else 'error-box'}'><strong>Q{i+1} (QCU) : {'✅ VRAI' if juste else '❌ FAUX'}</strong><br>{q.get('question')}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='{'correct-box' if juste else 'error-box'}'><strong>Q{i+1} (QCU) : {'✅ VRAI' if juste else '❌ FAUX'}</strong><br>{question_propre}</div>", unsafe_allow_html=True)
                     st.write(f"Ton choix : **{mon_choix if mon_choix else 'Aucune réponse'}** | La bonne réponse était : **{bonne_rep}**")
                     with st.expander("Voir l'explication complète"): st.markdown(assembler_texte_html(q.get('explication')), unsafe_allow_html=True)
                 
@@ -290,16 +296,16 @@ if 'data' in st.session_state:
                     ratio_mots = len(mots_trouves) / max(1, len(mots_cles))
                     
                     if ratio_mots >= 0.5:
-                        st.markdown(f"<div class='correct-box'><strong>Q{i+1} (Rédaction) : ✅ Bonne réflexion globale</strong><br>{q.get('question')}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='correct-box'><strong>Q{i+1} (Rédaction) : ✅ Bonne réflexion globale</strong><br>{question_propre}</div>", unsafe_allow_html=True)
                     else:
-                        st.markdown(f"<div class='warning-box'><strong>Q{i+1} (Rédaction) : ⚠️ Incomplet ou imprécis</strong><br>{q.get('question')}</div>", unsafe_allow_html=True)
-                        ajouter_erreur_session(matiere, q.get('question'), reponse_user[:50]+"...", ", ".join(mots_cles), assembler_texte_html(q.get('explication')))
+                        st.markdown(f"<div class='warning-box'><strong>Q{i+1} (Rédaction) : ⚠️ Incomplet ou imprécis</strong><br>{question_propre}</div>", unsafe_allow_html=True)
+                        ajouter_erreur_session(matiere, question_propre, reponse_user[:50]+"...", ", ".join(mots_cles), assembler_texte_html(q.get('explication')))
 
                     st.write(f"**Ta rédaction :** {reponse_user if reponse_user else '*Aucune réponse fournie*'}")
                     st.markdown(f"**Mots-clés attendus :** {', '.join(mots_cles)} *(Tu as trouvé : {len(mots_trouves)}/{len(mots_cles)})*")
                     
                     with st.expander("Voir la correction type du Professeur"): 
-                        st.success(f"**Réponse attendue :**<br>{q.get('reponse_attendue')}")
+                        st.success(f"**Réponse attendue :**<br>{nettoyer_question(q.get('reponse_attendue'))}")
                         st.markdown(assembler_texte_html(q.get('explication')), unsafe_allow_html=True)
 
             if total_qcu > 0:
