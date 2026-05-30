@@ -32,7 +32,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Utilitaires
+# 2. Utilitaires & BOUCLIER ANTI-CRASH
 # ==============================================================================
 if 'cahier_memoire' not in st.session_state:
     st.session_state['cahier_memoire'] = {}
@@ -63,51 +63,84 @@ def lire_word(buffer_fichier):
     doc = docx.Document(buffer_fichier)
     return " ".join([para.text for para in doc.paragraphs])
 
+def sauvetage_json_coupe(texte_ia):
+    """ LE BOUCLIER ABSOLU : Si l'IA est coupée par manque de mémoire, cette fonction répare le code en direct """
+    texte_propre = texte_ia.strip()
+    texte_propre = re.sub(r'^```[a-zA-Z]*\n', '', texte_propre)
+    texte_propre = re.sub(r'```$', '', texte_propre).strip()
+    
+    try:
+        # Essai normal
+        return json.loads(texte_propre, strict=False)
+    except json.JSONDecodeError:
+        # L'IA a été coupée ! On active le mode réparation.
+        # On ajoute les guillemets et crochets manquants pour fermer la synthèse.
+        if texte_propre.count('"') % 2 != 0:
+            texte_propre += '"'
+            
+        tentatives = [']}', '"]}', '}', '}]}', '"]}]}']
+        for t in tentatives:
+            try:
+                donnees_sauvees = json.loads(texte_propre + t, strict=False)
+                st.toast("⚠️ Le cours était si massif que l'IA a été coupée à la fin de la synthèse. Le reste a été sauvé avec succès !", icon="🛡️")
+                return donnees_sauvees
+            except:
+                pass
+                
+        # Si ça plante vraiment (très rare), on coupe à la hache au dernier paragraphe valide
+        coupe = texte_propre.rfind('","')
+        if coupe != -1:
+            try:
+                donnees_sauvees = json.loads(texte_propre[:coupe] + '"]}', strict=False)
+                st.toast("🛡️ Sauvetage d'urgence activé : La fin de la synthèse a été coupée, mais tes QCM sont sauvés.", icon="🛡️")
+                return donnees_sauvees
+            except:
+                pass
+                
+        raise Exception("Le document est beaucoup trop dense (plus de 8000 mots générés). Baisse légèrement le nombre de pages.")
+
 # ==============================================================================
-# 3. Moteur IA (Format Mixte : QCU + Ouvertes)
+# 3. Moteur IA (Format Mixte + Structure Inversée Sécurisée)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en LAS 1.
 Matière : {matiere} | Difficulté : {difficulte}/10 
-Tu dois générer EXACTEMENT {nb_qcu} QCU (Question à Choix Unique) et EXACTEMENT {nb_ouverte} Questions Ouvertes.
+Tu dois générer EXACTEMENT {nb_qcu} QCU (Choix Unique) et EXACTEMENT {nb_ouverte} Questions Ouvertes.
 
 RÈGLES DE FORMATAGE (CRITIQUE) :
 1. Réponds UNIQUEMENT avec un objet JSON valide.
-2. Échappe proprement les guillemets internes ou utilise des guillemets simples (') dans le texte.
-3. Utilise le HTML pour la mise en forme (<h3>, <strong>, <br>). Ne mets pas de Markdown.
+2. Échappe proprement les guillemets internes ou utilise des guillemets simples (').
+3. Utilise le HTML (<h3>, <strong>, <br>). Ne mets pas de Markdown.
 
-MISSION :
-1. COURS EXHAUSTIF MAIS OPTIMISÉ : Retranscris tous les mécanismes et définitions. Privilégie les listes à puces. Structure avec <h3> et mets les concepts vitaux en rouge (<span style='color:#ff4b4b'>...</span>).
+MISSION (DANS CET ORDRE PRÉCIS POUR SÉCURISER LA MÉMOIRE) :
+1. QUESTIONS MIXTES : Fais-les en premier. 
+   - QCU : 5 propositions, UNE SEULE bonne réponse possible.
+   - OUVERTE : Question de réflexion, donne la réponse attendue et 3 à 5 mots-clés.
 2. CONCEPTS CLÉS : 5 fiches réflexes indispensables.
-3. QUESTIONS MIXTES : 
-   - Type "QCU" : 5 propositions (A à E), UNE SEULE bonne réponse possible.
-   - Type "OUVERTE" : Une question de réflexion nécessitant une rédaction. Fournis la réponse attendue et une liste de 3 à 5 mots-clés incontournables.
+3. COURS EXHAUSTIF (SYNTHÈSE) : Fais-le EN DERNIER. Retranscris tous les mécanismes. Privilégie les listes à puces pour gagner de la place. Structure avec <h3> et mots vitaux en rouge <span style='color:#ff4b4b'>...</span>.
 
-FORMAT JSON STRICT :
+FORMAT JSON STRICT (RESPECTE L'ORDRE) :
 {{
-  "fiche_synthese": ["<h3>...</h3>", "Explication détaillée..."],
-  "concepts_cles": [{{"nom": "...", "role": "...", "objectif": "...", "avec_quoi": "...", "comment": "..."}}],
   "questions": [
     {{
       "type": "QCU",
       "question": "...",
       "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
       "reponse_correcte": "A", 
-      "explication": [
-        "<strong>A) VRAI</strong> : explication...",
-        "<strong>B) FAUX</strong> : explication du piège..."
-      ], 
+      "explication": ["<strong>A) VRAI</strong> : ...", "<strong>B) FAUX</strong> : ..."], 
       "indice": "...", "mnemotechnique": "..."
     }},
     {{
       "type": "OUVERTE",
-      "question": "Expliquez le mécanisme de...",
-      "reponse_attendue": "Le mécanisme se déroule en 3 phases...",
+      "question": "...",
+      "reponse_attendue": "...",
       "mots_cles": ["mot1", "mot2", "mot3"],
-      "explication": ["Rappel détaillé du cours..."],
-      "indice": "Pensez aux 3 phases...", "mnemotechnique": "..."
+      "explication": ["..."],
+      "indice": "...", "mnemotechnique": "..."
     }}
-  ]
+  ],
+  "concepts_cles": [{{"nom": "...", "role": "...", "objectif": "...", "avec_quoi": "...", "comment": "..."}}],
+  "fiche_synthese": ["<h3>...</h3>", "Explication détaillée..."]
 }}
 """
 
@@ -131,17 +164,10 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     rep = requests.post(url, json=payload)
     if rep.status_code != 200: raise Exception(f"Erreur Google : {rep.text}")
     
-    texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+    texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text']
     
-    debut = texte_ia.find('{')
-    fin = texte_ia.rfind('}') + 1
-    if debut != -1 and fin != 0:
-        texte_ia = texte_ia[debut:fin]
-    
-    try:
-        return json.loads(texte_ia, strict=False)
-    except json.JSONDecodeError as e:
-        raise Exception(f"Le cours généré a été coupé. Essaie de sélectionner un peu moins de pages d'un coup ! Détail: {e}")
+    # On passe le texte brut dans notre bouclier anti-crash
+    return sauvetage_json_coupe(texte_ia)
 
 # ==============================================================================
 # 4. Interface Sidebar
@@ -157,7 +183,7 @@ with st.sidebar:
 # ==============================================================================
 # 5. Application
 # ==============================================================================
-st.title("🎓 Simulateur LAS 1 (Mode QCU & Rédaction)")
+st.title("🎓 Simulateur LAS 1 (Anti-Crash 🛡️)")
 
 c1, c2 = st.columns(2)
 with c1: f_pdf = st.file_uploader("1. PDF du cours", type=['pdf'])
@@ -168,13 +194,12 @@ if f_pdf:
     p_tot = len(doc_t)
     doc_t.close()
     
-    st.info("💡 Analyse par tranches (3 à 5 pages max) recommandée pour éviter les surcharges serveur.")
     p_deb, p_fin = st.slider("Pages :", 1, p_tot, (1, p_tot))
     
-    if st.button("🚀 Générer la session", type="primary", use_container_width=True):
+    if st.button("🚀 Générer la session incassable", type="primary", use_container_width=True):
         if not api_key: st.error("Clé API manquante !")
         else:
-            with st.spinner("Création des QCU et Questions Ouvertes en cours..."):
+            with st.spinner("Analyse approfondie en cours (Protection Anti-Crash activée)..."):
                 try:
                     txt = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                     txt_w = lire_word(f_word) if f_word else ""
@@ -206,7 +231,6 @@ if 'data' in st.session_state:
                 # Interface QCU (Boutons Radio)
                 if type_q == "QCU":
                     opts = q.get('options', {})
-                    # index=None force l'étudiant à choisir, rien n'est coché par défaut
                     choix = st.radio(
                         "Choisis la bonne proposition :", 
                         options=list(opts.keys()), 
@@ -262,11 +286,9 @@ if 'data' in st.session_state:
                     mots_cles = q.get('mots_cles', [])
                     reponse_user = str(mon_choix) if mon_choix else ""
                     
-                    # Scan des mots-clés dans la réponse de l'étudiant
                     mots_trouves = [mot for mot in mots_cles if mot.lower() in reponse_user.lower()]
                     ratio_mots = len(mots_trouves) / max(1, len(mots_cles))
                     
-                    # Logique de couleur : Vert si on a plus de 50% des mots clés, orange sinon
                     if ratio_mots >= 0.5:
                         st.markdown(f"<div class='correct-box'><strong>Q{i+1} (Rédaction) : ✅ Bonne réflexion globale</strong><br>{q.get('question')}</div>", unsafe_allow_html=True)
                     else:
