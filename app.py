@@ -6,12 +6,13 @@ import docx
 from datetime import datetime
 import re
 import requests
-import time # Nécessaire pour la boucle d'auto-guérison
+import math
+import time
 
 # ==============================================================================
 # 1. Configuration et Design Premium de l'Application
 # ==============================================================================
-st.set_page_config(page_title="Prépa LAS 1 - Évaluation Premium", page_icon="🎓", layout="wide")
+st.set_page_config(page_title="Prépa LAS 1 - Évaluation Illimitée", page_icon="🎓", layout="wide")
 
 st.markdown("""
 <style>
@@ -69,140 +70,192 @@ def lire_word(buffer_fichier):
     return " ".join([para.text for para in doc.paragraphs])
 
 # ==============================================================================
-# 3. Moteur IA (Aves Boucle de Sauvetage Automatique)
+# 3. Analyseur Textuel par Expressions Régulières (Regex) - Anti-Crash
+# ==============================================================================
+def extraire_questions_texte(texte_ia):
+    blocs = re.findall(r'===QUESTION_START===(.*?)===QUESTION_END===', texte_ia, re.DOTALL)
+    questions_chargees = []
+    
+    for b in blocs:
+        try:
+            type_q_match = re.search(r'TYPE:\s*(QCU|OUVERTE)', b, re.IGNORECASE)
+            type_q = type_q_match.group(1).upper().strip() if type_q_match else "QCU"
+            
+            enonce_match = re.search(r'ENONCE:\s*(.*?)\s*(?=A:|REPONSE:|EXPLICATION:)', b, re.DOTALL | re.IGNORECASE)
+            enonce = enonce_match.group(1).strip() if enonce_match else "Énoncé non récupéré"
+            
+            explication_match = re.search(r'EXPLICATION:\s*(.*?)\s*(?=INDICE:|MNEMO:|$)', b, re.DOTALL | re.IGNORECASE)
+            explication = explication_match.group(1).strip() if explication_match else ""
+            
+            indice_match = re.search(r'INDICE:\s*(.*?)\s*(?=MNEMO:|$)', b, re.DOTALL | re.IGNORECASE)
+            indice = indice_match.group(1).strip() if indice_match else ""
+            
+            mnemo_match = re.search(r'MNEMO:\s*(.*?)\s*$', b, re.DOTALL | re.IGNORECASE)
+            mnemo = mnemo_match.group(1).strip() if mnemo_match else ""
+            
+            if type_q == "QCU":
+                opt_A = re.search(r'\bA:\s*(.*?)\s*(?=\bB:)', b, re.DOTALL | re.IGNORECASE)
+                opt_B = re.search(r'\bB:\s*(.*?)\s*(?=\bC:)', b, re.DOTALL | re.IGNORECASE)
+                opt_C = re.search(r'\bC:\s*(.*?)\s*(?=\bD:)', b, re.DOTALL | re.IGNORECASE)
+                opt_D = re.search(r'\bD:\s*(.*?)\s*(?=\bE:)', b, re.DOTALL | re.IGNORECASE)
+                opt_E = re.search(r'\bE:\s*(.*?)\s*(?=\bREPONSE:)', b, re.DOTALL | re.IGNORECASE)
+                rep_match = re.search(r'REPONSE:\s*([A-E])', b, re.IGNORECASE)
+                
+                options = {
+                    "A": opt_A.group(1).strip() if opt_A else "Option A",
+                    "B": opt_B.group(1).strip() if opt_B else "Option B",
+                    "C": opt_C.group(1).strip() if opt_C else "Option C",
+                    "D": opt_D.group(1).strip() if opt_D else "Option D",
+                    "E": opt_E.group(1).strip() if opt_E else "Option E"
+                }
+                reponse_correcte = rep_match.group(1).upper().strip() if rep_match else "A"
+                
+                questions_chargees.append({
+                    "type": "QCU", "question": enonce, "options": options,
+                    "reponse_correcte": reponse_correcte, "explication": explication,
+                    "indice": indice, "mnemotechnique": mnemo
+                })
+            else:
+                rep_match = re.search(r'REPONSE:\s*(.*?)\s*(?=MOTS_CLES:|EXPLICATION:)', b, re.DOTALL | re.IGNORECASE)
+                rep_attendue = rep_match.group(1).strip() if rep_match else ""
+                
+                mots_match = re.search(r'MOTS_CLES:\s*(.*?)\s*(?=EXPLICATION:)', b, re.DOTALL | re.IGNORECASE)
+                mots_cles = [m.strip() for m in mots_match.group(1).split(',')] if mots_match else []
+                
+                questions_chargees.append({
+                    "type": "OUVERTE", "question": enonce, "reponse_attendue": rep_attendue,
+                    "mots_cles": mots_cles, "explication": explication,
+                    "indice": indice, "mnemotechnique": mnemo
+                })
+        except:
+            continue
+    return {"questions": questions_chargees}
+
+# ==============================================================================
+# 4. Moteur IA Séquentiel (Haute Capacité)
 # ==============================================================================
 SYSTEM_PROMPT = """
-Tu es un Professeur expert en LAS 1. Ton unique objectif est d'évaluer l'étudiant de manière rigoureuse sur le cours fourni.
+Tu es un Professeur expert en LAS 1. Évalue l'étudiant sur le texte fourni.
 Matière : {matiere} | Difficulté : {difficulte}/10 
 
-Tu dois générer IMPÉRATIVEMENT un total exact de {total_questions} questions réparties ainsi :
-- EXACTEMENT {nb_qcu} questions de type "QCU"
-- EXACTEMENT {nb_ouverte} questions de type "OUVERTE"
+Génère EXACTEMENT {nb_qcu} questions de type "QCU" et EXACTEMENT {nb_ouverte} questions de type "OUVERTE".
 
-RÈGLES DE CONDUITE INFORMATIQUES :
-1. Réponds STRICTEMENT avec l'objet JSON demandé. Aucune phrase explicative en dehors du JSON.
-2. Interdiction d'utiliser des guillemets doubles (") dans tes textes de questions ou d'options. Utilise uniquement des apostrophes simples (').
-3. N'injecte aucune balise HTML dans les champs "question" et "options".
-4. Dans le champ "explication", utilise exclusivement du HTML (<strong>, <br>) pour séparer la correction de chaque proposition.
+RÈGLE ABSOLUE : N'utilise JAMAIS de format JSON. Tu dois répondre uniquement en utilisant l'architecture textuelle suivante :
 
-PROPRIÉTÉS DES QUESTIONS :
-- QCU : 5 choix uniques (A à E), une seule et unique lettre correcte.
-- OUVERTE : Question de réflexion nécessitant une rédaction complète, réponse attendue exhaustive et liste de 3 à 5 mots-clés d'évaluation.
+===QUESTION_START===
+TYPE: QCU
+ENONCE: [Insère l'énoncé de la question ici]
+A: [Option A]
+B: [Option B]
+C: [Option C]
+D: [Option D]
+E: [Option E]
+REPONSE: [Met uniquement la lettre de la bonne réponse, ex: A]
+EXPLICATION: <strong>A) VRAI</strong> : ... <br><strong>B) FAUX</strong> : ...
+INDICE: [Indice]
+MNEMO: [Astuce mémo]
+===QUESTION_END===
 
-FORMAT JSON REQUIS :
-{{
-  "questions": [
-    {{
-      "type": "QCU",
-      "question": "Énoncé textuel fluide",
-      "options": {{"A": "Proposition A", "B": "Proposition B", "C": "Proposition C", "D": "Proposition D", "E": "Proposition E"}},
-      "reponse_correcte": "A", 
-      "explication": ["<strong>A) VRAI</strong> : explication...", "<strong>B) FAUX</strong> : description du piège..."], 
-      "indice": "Indice...", "mnemotechnique": "Moyen mémo..."
-    }},
-    {{
-      "type": "OUVERTE",
-      "question": "Énoncé textuel de la question ouverte",
-      "reponse_attendue": "Grille de réponse idéale pour obtenir les points",
-      "mots_cles": ["mot1", "mot2", "mot3"],
-      "explication": ["Rappel fondamental du cours..."],
-      "indice": "Piste...", "mnemotechnique": "Astuce..."
-    }}
-  ]
-}}
+===QUESTION_START===
+TYPE: OUVERTE
+ENONCE: [Insère la question ouverte de réflexion scientifique]
+REPONSE: [Insère le modèle idéal de réponse attendue]
+MOTS_CLES: [mot1, mot2, mot3, mot4]
+EXPLICATION: [Explication physiologique ou méthodologique]
+INDICE: [Piste]
+MNEMO: [Moyen mnémotechnique]
+===QUESTION_END===
 """
 
-def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key, max_tentatives=3):
-    nb_qcu = max(1, round(nombre_qcm * 0.8))
-    nb_ouverte = max(1, nombre_qcm - nb_qcu)
-    total_reels = nb_qcu + nb_ouverte
+def generer_donnees_illimitees(txt_complet, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key):
+    # Séparation automatique par bloc de pages pour avaler n'importe quel volume
+    lots_pages = [p for p in txt_complet.split(' PAGE ') if p.strip()]
     
-    prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nb_qcu=nb_qcu, nb_ouverte=nb_ouverte, total_questions=total_reels)
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+    TAILLE_LOT = 5
+    chunks_texte = []
+    for i in range(0, len(lots_pages), TAILLE_LOT):
+        paquet = lots_pages[i:i+TAILLE_LOT]
+        chunks_texte.append(" ".join(paquet))
     
-    payload = {
-        "contents": [{"parts": [{"text": prompt + "\nCOURS DU CONCOURS À TRAITER :\n" + texte_pdf}]}], 
-        "generationConfig": {
-            "temperature": 0.2, 
-            "maxOutputTokens": 8192,
-            "responseMimeType": "application/json"
+    if not chunks_texte:
+        chunks_texte = [txt_complet]
+        
+    all_questions = []
+    questions_par_chunk = max(1, math.ceil(nombre_qcm / len(chunks_texte)))
+    
+    nb_qcu = max(1, round(questions_par_chunk * 0.8))
+    nb_ouverte = max(1, questions_par_chunk - nb_qcu)
+    
+    barre_progression = st.progress(0.0)
+    
+    for idx, chunk in enumerate(chunks_texte):
+        if len(all_questions) >= nombre_qcm:
+            break
+            
+        barre_progression.progress(idx / len(chunks_texte))
+        
+        prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nb_qcu=nb_qcu, nb_ouverte=nb_ouverte)
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        
+        payload = {
+            "contents": [{"parts": [{"text": prompt + "\nNOTES WORD EXTRA:\n" + (texte_word or "") + "\n\nEXTRAIT DU PDF DU COURS :\n" + chunk}]}],
+            "generationConfig": {"temperature": 0.2}
         }
-    }
-    
-    # BOUCLE D'AUTO-GUÉRISON : On donne 3 chances à l'IA de fournir un JSON parfait
-    for essai in range(max_tentatives):
+        
         try:
             rep = requests.post(url, json=payload)
-            if rep.status_code != 200: 
-                raise Exception(f"Erreur d'accès aux serveurs Google : {rep.text}")
+            if rep.status_code == 200:
+                texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text']
+                res = extraire_questions_texte(texte_ia)
+                all_questions.extend(res.get('questions', []))
+            elif rep.status_code == 429:
+                time.sleep(5) # Auto-pause si surcharge de requêtes
+        except:
+            pass
             
-            texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text']
-            
-            # Extraction propre du JSON
-            debut = texte_ia.find('{')
-            fin = texte_ia.rfind('}') + 1
-            if debut == -1 or fin == 0:
-                raise Exception("JSON introuvable.")
-                
-            json_brut = texte_ia[debut:fin].strip()
-            
-            # On tente de le lire informatiquement
-            return json.loads(json_brut, strict=False)
-            
-        except json.JSONDecodeError as e:
-            # Si l'IA a oublié une virgule, on relance en silence (sauf si c'est la 3ème fois)
-            if essai == max_tentatives - 1:
-                raise Exception(f"L'IA a généré un texte trop dense avec une erreur de formatage ({e}). Astuce : Demandez moins de questions ou sélectionnez moins de pages.")
-            time.sleep(2) # On patiente 2 secondes avant de relancer la requête
-        except Exception as e:
-            if essai == max_tentatives - 1:
-                raise e
-            time.sleep(2)
+        time.sleep(0.5)
+        
+    barre_progression.empty()
+    return {"questions": all_questions[:nombre_qcm]}
 
 # ==============================================================================
-# 4. Interface Menu Configuration
+# 5. Interface Graphique Streamlit
 # ==============================================================================
 with st.sidebar:
     st.header("⚙️ Configuration")
     api_key = st.text_input("Clé API Gemini :", type="password")
     matiere = st.selectbox("Matière :", ["Biologie / Biochimie", "Épidémiologie / Biostats", "Anatomie", "Pharmacologie", "Droit Médical"])
     difficulte = st.slider("Niveau de pièges :", 1, 10, 8)
-    nombre_qcm = st.number_input("Volume total de questions désiré :", 1, 30, 10)
+    nombre_qcm = st.number_input("Volume total de questions désiré :", 1, 40, 10)
     mode_examen = st.toggle("🚨 Activer le Mode Concours (Masquer indices)")
 
-# ==============================================================================
-# 5. Interface de Chargement Documentaire
-# ==============================================================================
-st.title("🎓 Simulateur d'Évaluation Intensive LAS 1")
+st.title("🎓 Simulateur d'Évaluation Intensive Haute Capacité")
 
 c1, c2 = st.columns(2)
-with c1: f_pdf = st.file_uploader("1. Charger le support de cours (PDF)", type=['pdf'])
-with c2: f_word = st.file_uploader("2. Notes personnelles complémentaires (Word)", type=['docx'])
+with c1: f_pdf = st.file_uploader("1. Support de cours (PDF volumineux accepté)", type=['pdf'])
+with c2: f_word = st.file_uploader("2. Notes personnelles (Word)", type=['docx'])
 
 if f_pdf:
     doc_t = fitz.open(stream=f_pdf.read(), filetype="pdf")
     p_tot = len(doc_t)
     doc_t.close()
     
-    p_deb, p_fin = st.slider("Sélectionner l'intervalle de pages à tester :", 1, p_tot, (1, min(10, p_tot)))
+    p_deb, p_fin = st.slider("Sélectionner la plage de pages :", 1, p_tot, (1, p_tot))
     
-    if st.button("🚀 Initialiser la Session d'Évaluation", type="primary", use_container_width=True):
+    if st.button("🚀 Lancer l'Évaluation Globale (Sans Limite)", type="primary", use_container_width=True):
         if not api_key: 
-            st.error("Action impossible : Clé API absente de la configuration.")
+            st.error("Clé API absente.")
         else:
-            with st.spinner("Analyse en cours (Auto-correction des bugs activée en arrière-plan)..."):
+            with st.spinner("Digestion intégrale du document et ciblage des pièges en cours..."):
                 try:
                     txt = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                     txt_w = lire_word(f_word) if f_word else ""
-                    st.session_state['data'] = generer_donnees(txt, txt_w, matiere, difficulte, nombre_qcm, mode_examen, api_key)
+                    st.session_state['data'] = generer_donnees_illimitees(txt, txt_w, matiere, difficulte, nombre_qcm, mode_examen, api_key)
                     st.session_state['examen_soumis'] = False
                     st.rerun()
                 except Exception as e: 
                     st.error(f"Incident technique de traitement : {e}")
 
-# ==============================================================================
-# 6. Module d'Affichage Dynamique de l'Entraînement
-# ==============================================================================
 if 'data' in st.session_state:
     data = st.session_state['data']
     t1, t2 = st.tabs(["✍️ Grille d'Entraînement", "📓 Mon Cahier d'Erreurs"])
@@ -211,76 +264,64 @@ if 'data' in st.session_state:
         liste_questions = data.get('questions', [])
         is_disabled = st.session_state.get('examen_soumis', False)
         
-        # Affichage statique et immuable des composants d'évaluation
+        if not liste_questions:
+            st.warning("Aucune question n'a pu être extraite. Relance la génération.")
+            
         for i, q in enumerate(liste_questions):
             type_q = q.get('type', 'QCU')
             question_propre = nettoyer_question(q.get('question', ''))
             
-            st.markdown(f"**Question {i+1}** 🔹 *Format {type_q}* : {question_propre}")
+            st.markdown(f"**Question {i+1}** 🔹 *{type_q}* : {question_propre}")
             
             if type_q == "QCU":
                 opts = q.get('options', {})
                 choix = st.radio(
-                    "Sélectionner l'affirmation correcte :", 
-                    options=list(opts.keys()), 
+                    "Sélectionner l'affirmation correcte :", options=list(opts.keys()), 
                     format_func=lambda x: f"{x}. {nettoyer_question(opts[x])}",
-                    index=None,
-                    key=f"widget_qcu_{i}",
-                    disabled=is_disabled
+                    index=None, key=f"widget_qcu_{i}", disabled=is_disabled
                 )
-            
             elif type_q == "OUVERTE":
-                reponse_user = st.text_area("✍️ Rédiger votre démonstration doctrinale ou physiologique :", key=f"widget_ouv_{i}", height=120, disabled=is_disabled)
+                reponse_user = st.text_area("✍️ Saisis ta réponse rédigée :", key=f"widget_ouv_{i}", height=120, disabled=is_disabled)
             
-            # Affichage des outils d'aide durant la phase de recherche uniquement
             if not is_disabled and not mode_examen:
                 col_h1, col_h2 = st.columns(2)
                 with col_h1:
-                    with st.expander("💡 Obtenir un indice de contextualisation"): 
-                        st.info(nettoyer_question(q.get('indice', 'Aucun indice fourni.')))
+                    with st.expander("💡 Indice de réflexion"): st.info(nettoyer_question(q.get('indice', 'Aucun indice.')))
                 with col_h2:
-                    with st.expander("🧠 Point d'ancrage mnémotechnique"): 
-                        st.warning(nettoyer_question(q.get('mnemotechnique', 'Aucune astuce.')))
+                    with st.expander("🧠 Point d'ancrage mnémotechnique"): st.warning(f"{nettoyer_question(q.get('mnemotechnique', 'Aucune astuce.'))}")
             
-            # Injection immédiate de la correction sous le widget correspondant après soumission
             if is_disabled:
                 if type_q == "QCU":
                     bonne_rep = q.get('reponse_correcte', '')
-                    
-                    # On évite le crash si l'étudiant valide sans cocher
                     choix_propre = choix if choix else "Aucune réponse"
                     juste = (choix == bonne_rep and choix is not None)
                     
                     if juste:
-                        st.markdown(f"<div class='correct-box'>✅ <b>Proposition Exacte !</b> La réponse attendue était bien la lettre {bonne_rep}.</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='correct-box'>✅ <b>Proposition Exacte !</b> La réponse attendue était {bonne_rep}.</div>", unsafe_allow_html=True)
                     else:
-                        st.markdown(f"<div class='error-box'>❌ <b>Discordance Détectée !</b> Vous avez coché la lettre {choix_propre}. L'affirmation vraie était la {bonne_rep}.</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='error-box'>❌ <b>Erreur !</b> Tu as coché la lettre {choix_propre}. L'affirmation vraie était la {bonne_rep}.</div>", unsafe_allow_html=True)
                         ajouter_erreur_session(matiere, question_propre, str(choix_propre), bonne_rep, assembler_texte_html(q.get('explication')))
                     
-                    with st.expander("Consulter le rapport d'analyse détaillé"): 
-                        st.markdown(assembler_texte_html(q.get('explication')), unsafe_allow_html=True)
+                    with st.expander("Analyse détaillée"): st.markdown(assembler_texte_html(q.get('explication')), unsafe_allow_html=True)
                 
                 elif type_q == "OUVERTE":
                     mots_cles = q.get('mots_cles', [])
-                    if not isinstance(mots_cles, list): mots_cles = [mots_cles] if mots_cles else []
-                    
                     reponse_str = str(reponse_user) if reponse_user else ""
                     mots_trouves = [m for m in mots_cles if str(m).lower() in reponse_str.lower()]
                     ratio = len(mots_trouves) / max(1, len(mots_cles))
                     
                     if ratio >= 0.5:
-                        st.markdown(f"<div class='correct-box'>✅ <b>Validation Sémantique Réussie !</b> ({len(mots_trouves)}/{len(mots_cles)} mots-clés identifiés dans votre production).</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='correct-box'>✅ <b>Validation réussie !</b> ({len(mots_trouves)}/{len(mots_cles)} mots-clés présents).</div>", unsafe_allow_html=True)
                     else:
-                        st.markdown(f"<div class='warning-box'>⚠️ <b>Axe d'amélioration requis :</b> Restitution incomplète ou trop imprécise ({len(mots_trouves)}/{len(mots_cles)} mots-clés présents).</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='warning-box'>⚠️ <b>Incomplet :</b> Restitution trop imprécise ({len(mots_trouves)}/{len(mots_cles)} mots-clés présents).</div>", unsafe_allow_html=True)
                         ajouter_erreur_session(matiere, question_propre, reponse_str[:60]+"...", ", ".join(mots_cles), assembler_texte_html(q.get('explication')))
                     
-                    st.markdown(f"<b>Mots-clés fondamentaux attendus :</b> <code>{', '.join(mots_cles)}</code>", unsafe_allow_html=True)
-                    with st.expander("Consulter la grille analytique du Professeur"): 
-                        st.success(f"**Modèle idéal de rédaction :** {nettoyer_question(q.get('reponse_attendue', ''))}")
+                    st.markdown(f"<b>Mots-clés requis :</b> <code>{', '.join(mots_cles)}</code>", unsafe_allow_html=True)
+                    with st.expander("Grille analytique de correction"): 
+                        st.success(f"**Modèle idéal :** {nettoyer_question(q.get('reponse_attendue', ''))}")
                         st.markdown(assembler_texte_html(q.get('explication')), unsafe_allow_html=True)
             st.divider()
         
-        # Gestionnaires de soumission globale
         if not st.session_state['examen_soumis']:
             if st.button("🏁 Clôturer la Session et Corriger ma Copie", type="primary", use_container_width=True):
                 st.session_state['examen_soumis'] = True
@@ -290,20 +331,19 @@ if 'data' in st.session_state:
                 st.session_state['examen_soumis'] = False
                 st.rerun()
 
-    # --- MODULE DU CAHIER D'ERREURS PERMANENT ---
     with t2:
         mem = st.session_state.get('cahier_memoire', {})
         if not mem: 
-            st.info("Parfait ! Aucune anomalie n'est enregistrée dans votre carnet d'erreurs pour le moment.")
+            st.info("Aucune erreur enregistrée.")
         else:
             for mat, errs in mem.items():
-                with st.expander(f"Discipline : {mat} ({len(errs)} fautes capitalisées)", expanded=True):
+                with st.expander(f"Discipline : {mat} ({len(errs)} fautes stockées)", expanded=True):
                     for e in reversed(errs):
                         st.markdown(f"""
                         <div class='erreur-log'>
-                            <strong>Énoncé de la Question :</strong> {e['question']}<br>
-                            <span style='color:#ff4b4b'><b>Votre production :</b> {e['choix_user']}</span> | 
-                            <span style='color:#28a745'><b>Donnée académique valide :</b> {e['bonnes_rep']}</span><br><br>
-                            <strong>Fondement et justification :</strong><br>{e['explication']}
+                            <strong>Question :</strong> {e['question']}<br>
+                            <span style='color:#ff4b4b'><b>Ta réponse :</b> {e['choix_user']}</span> | 
+                            <span style='color:#28a745'><b>Donnée attendue :</b> {e['bonnes_rep']}</span><br><br>
+                            <strong>Justification :</strong><br>{e['explication']}
                         </div>
                         """, unsafe_allow_html=True)
