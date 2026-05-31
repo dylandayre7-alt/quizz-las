@@ -12,7 +12,7 @@ import time
 # ==============================================================================
 # 1. Configuration et Design Premium de l'Application
 # ==============================================================================
-st.set_page_config(page_title="Prépa LAS 1 - Évaluation Illimitée", page_icon="🎓", layout="wide")
+st.set_page_config(page_title="Prépa LAS 1 - Évaluation Éclair", page_icon="🎓", layout="wide")
 
 st.markdown("""
 <style>
@@ -70,7 +70,7 @@ def lire_word(buffer_fichier):
     return " ".join([para.text for para in doc.paragraphs])
 
 # ==============================================================================
-# 3. Analyseur Textuel par Expressions Régulières (Regex) - Anti-Crash
+# 3. Analyseur Textuel Résilient (Regex)
 # ==============================================================================
 def extraire_questions_texte(texte_ia):
     blocs = re.findall(r'===QUESTION_START===(.*?)===QUESTION_END===', texte_ia, re.DOTALL)
@@ -132,7 +132,7 @@ def extraire_questions_texte(texte_ia):
     return {"questions": questions_chargees}
 
 # ==============================================================================
-# 4. Moteur IA Séquentiel (Haute Capacité)
+# 4. Moteur IA Haute Vitesse (Gros volumes)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en LAS 1. Évalue l'étudiant sur le texte fourni.
@@ -158,7 +158,7 @@ MNEMO: [Astuce mémo]
 
 ===QUESTION_START===
 TYPE: OUVERTE
-ENONCE: [Insère la question ouverte de réflexion scientifique]
+ENONCE: [Insère la question ouverte]
 REPONSE: [Insère le modèle idéal de réponse attendue]
 MOTS_CLES: [mot1, mot2, mot3, mot4]
 EXPLICATION: [Explication physiologique ou méthodologique]
@@ -167,11 +167,11 @@ MNEMO: [Moyen mnémotechnique]
 ===QUESTION_END===
 """
 
-def generer_donnees_illimitees(txt_complet, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key):
-    # Séparation automatique par bloc de pages pour avaler n'importe quel volume
+def generer_donnees_rapides(txt_complet, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key):
     lots_pages = [p for p in txt_complet.split(' PAGE ') if p.strip()]
     
-    TAILLE_LOT = 5
+    # 🌟 OPTIMISATION : On passe de 5 pages à 20 pages par lot pour diviser le temps par 4
+    TAILLE_LOT = 20 
     chunks_texte = []
     for i in range(0, len(lots_pages), TAILLE_LOT):
         paquet = lots_pages[i:i+TAILLE_LOT]
@@ -209,12 +209,10 @@ def generer_donnees_illimitees(txt_complet, texte_word, matiere, difficulte, nom
                 res = extraire_questions_texte(texte_ia)
                 all_questions.extend(res.get('questions', []))
             elif rep.status_code == 429:
-                time.sleep(5) # Auto-pause si surcharge de requêtes
+                time.sleep(3) # Petite pause uniquement si le quota sature
         except:
             pass
             
-        time.sleep(0.5)
-        
     barre_progression.empty()
     return {"questions": all_questions[:nombre_qcm]}
 
@@ -229,10 +227,10 @@ with st.sidebar:
     nombre_qcm = st.number_input("Volume total de questions désiré :", 1, 40, 10)
     mode_examen = st.toggle("🚨 Activer le Mode Concours (Masquer indices)")
 
-st.title("🎓 Simulateur d'Évaluation Intensive Haute Capacité")
+st.title("🎓 Simulateur d'Évaluation Haute Vitesse (Illimité)")
 
 c1, c2 = st.columns(2)
-with c1: f_pdf = st.file_uploader("1. Support de cours (PDF volumineux accepté)", type=['pdf'])
+with c1: f_pdf = st.file_uploader("1. Support de cours (Tout volume accepté)", type=['pdf'])
 with c2: f_word = st.file_uploader("2. Notes personnelles (Word)", type=['docx'])
 
 if f_pdf:
@@ -242,19 +240,19 @@ if f_pdf:
     
     p_deb, p_fin = st.slider("Sélectionner la plage de pages :", 1, p_tot, (1, p_tot))
     
-    if st.button("🚀 Lancer l'Évaluation Globale (Sans Limite)", type="primary", use_container_width=True):
+    if st.button("🚀 Lancer l'Évaluation Ultra-Rapide", type="primary", use_container_width=True):
         if not api_key: 
             st.error("Clé API absente.")
         else:
-            with st.spinner("Digestion intégrale du document et ciblage des pièges en cours..."):
+            with st.spinner("Génération éclair des questions en cours..."):
                 try:
                     txt = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                     txt_w = lire_word(f_word) if f_word else ""
-                    st.session_state['data'] = generer_donnees_illimitees(txt, txt_w, matiere, difficulte, nombre_qcm, mode_examen, api_key)
+                    st.session_state['data'] = generer_donnees_rapides(txt, txt_w, matiere, difficulte, nombre_qcm, mode_examen, api_key)
                     st.session_state['examen_soumis'] = False
                     st.rerun()
                 except Exception as e: 
-                    st.error(f"Incident technique de traitement : {e}")
+                    st.error(f"Incident technique : {e}")
 
 if 'data' in st.session_state:
     data = st.session_state['data']
