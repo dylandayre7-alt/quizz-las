@@ -144,7 +144,8 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nb_qcu=nb_qcu, nb_ouverte=nb_ouverte)
     
     cle_propre = re.sub(r'[^a-zA-Z0-9_-]', '', api_key)
-    url_base = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    # MODIFICATION CRITIQUE : Utilisation de Gemini 1.5 Flash pour contourner la limite de 20 requêtes/jour
+    url_base = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
     
     payload = {
         "contents": [{"parts": [{"text": prompt + "\nCOURS :\n" + texte_pdf + "\nNOTES :\n" + texte_word}]}], 
