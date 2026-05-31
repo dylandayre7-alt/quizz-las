@@ -97,7 +97,7 @@ def sauvetage_json_coupe(texte_ia):
         raise Exception("Le document a saturé la mémoire de l'IA. Baisse le nombre de pages.")
 
 # ==============================================================================
-# 3. Moteur IA (Une seule passe, stable)
+# 3. Moteur IA (Architecture Parfaite avec Requests Paramétré)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en LAS 1.
@@ -138,9 +138,11 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     
     prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nb_qcu=nb_qcu, nb_ouverte=nb_ouverte)
     
-    # Sécurité anti-espace pour la clé API
-    cle_propre = api_key.strip()
-    url = f"[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=){cle_propre}"
+    # Le Fix ultime : Nettoyage drastique et passage par dictionnaire
+    cle_propre = re.sub(r'[^a-zA-Z0-9_-]', '', api_key)
+    
+    url_de_base = "[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent)"
+    parametres_url = {"key": cle_propre}
     
     payload = {
         "contents": [{"parts": [{"text": prompt + "\\nCOURS :\\n" + texte_pdf + "\\nNOTES :\\n" + texte_word}]}], 
@@ -151,9 +153,10 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
         }
     }
     
-    rep = requests.post(url, json=payload)
+    rep = requests.post(url_de_base, params=parametres_url, json=payload)
+    
     if rep.status_code != 200: 
-        raise Exception(f"Erreur API Google ({rep.status_code}) : Vérifiez votre clé ou votre connexion.")
+        raise Exception(f"Erreur API Google ({rep.status_code}) : {rep.text}")
     
     texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text']
     return sauvetage_json_coupe(texte_ia)
@@ -280,4 +283,4 @@ if 'data' in st.session_state:
         for mat, errs in mem.items():
             with st.expander(f"{mat} ({len(errs)} erreurs)"):
                 for e in reversed(errs):
-                    st.markdown(f"<div class='erreur-log'><strong>{e['question']}</strong><br>Toi : {e['choix_user']} | Attendu : {e['bonnes_rep']}<br><br><small>{e['explication']}</small></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='erreur-log'><strong>{e['question']}</strong><br>Toi : {e['choix_user']} | Attendu : {e['bonnes_rep']}<br><br><small>{e['explication']}</small></div>", unsafe_allow_html=True
