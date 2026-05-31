@@ -18,9 +18,9 @@ st.markdown("""
     .stTabs [data-baseweb="tab"] { height: 50px; background-color: #f0f2f6; border-radius: 10px 10px 0 0; padding: 10px 20px; }
     .stTabs [aria-selected="true"] { background-color: #ff4b4b; color: white; font-weight: bold; }
     
-    .correct-box { background-color: #155724; padding: 15px; border-radius: 10px; margin-top: 10px; margin-bottom: 10px; color: #d4edda; border: 1px solid #c3e6cb;}
-    .error-box { background-color: #4a1317; padding: 15px; border-radius: 10px; margin-top: 10px; margin-bottom: 10px; color: #f8d7da; border: 1px solid #f5c6cb;}
-    .warning-box { background-color: #856404; padding: 15px; border-radius: 10px; margin-top: 10px; margin-bottom: 10px; color: #ffeeba; border: 1px solid #ffeeba;}
+    .correct-box { background-color: #155724; padding: 15px; border-radius: 10px; margin-bottom: 10px; color: #d4edda; border: 1px solid #c3e6cb;}
+    .error-box { background-color: #4a1317; padding: 15px; border-radius: 10px; margin-bottom: 10px; color: #f8d7da; border: 1px solid #f5c6cb;}
+    .warning-box { background-color: #856404; padding: 15px; border-radius: 10px; margin-bottom: 10px; color: #ffeeba; border: 1px solid #ffeeba;}
     
     .erreur-log { border-left: 4px solid #ff4b4b; padding: 15px; margin-bottom: 15px; background-color: #2b2b2b; color: #ffffff; border-radius: 5px; border: 1px solid #444; }
 </style>
@@ -67,7 +67,7 @@ def lire_word(buffer_fichier):
 def sauvetage_json_coupe(texte_ia):
     debut = texte_ia.find('{')
     if debut == -1:
-        raise Exception("L'IA n'a pas renvoyé de format lisible. Relance l'analyse.")
+        raise Exception("L'IA n'a pas renvoyé de format lisible. Relance l'analyse avec moins de pages.")
         
     texte_brut = texte_ia[debut:]
     texte_brut = re.sub(r'```[a-zA-Z]*$', '', texte_brut)
@@ -97,7 +97,7 @@ def sauvetage_json_coupe(texte_ia):
         raise Exception("Le document a généré un code trop complexe et a saturé la mémoire. Baisse le nombre de pages.")
 
 # ==============================================================================
-# 3. Moteur IA (Format Mixte, sans découpage, avec sécurisation de la clé)
+# 3. Moteur IA (Nettoyage militaire URL + Clé)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en LAS 1. Ton unique but est d'évaluer l'étudiant.
@@ -139,9 +139,10 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     
     prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nb_qcu=nb_qcu, nb_ouverte=nb_ouverte)
     
-    # Sécurisation de l'URL pour éviter le bug "No connection adapters"
+    # KÄRCHER ABSOLU SUR LA CLÉ ET L'URL
     cle_propre = re.sub(r'[^a-zA-Z0-9_-]', '', api_key)
-    url_base = "[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent)"
+    url_brute = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    url_propre = re.sub(r'[^a-zA-Z0-9:/\.-]', '', url_brute)
     
     payload = {
         "contents": [{"parts": [{"text": prompt + "\nCOURS :\n" + texte_pdf + "\nNOTES :\n" + texte_word}]}], 
@@ -151,7 +152,7 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
         }
     }
     
-    rep = requests.post(url_base, params={"key": cle_propre}, json=payload)
+    rep = requests.post(url_propre, params={"key": cle_propre}, json=payload)
     
     if rep.status_code != 200: 
         raise Exception(f"Erreur API Google ({rep.status_code}) : {rep.text}")
@@ -232,7 +233,7 @@ if 'data' in st.session_state:
             if not is_disabled and not mode_examen:
                 col_h1, col_h2 = st.columns(2)
                 with col_h1:
-                    with st.expander("💡 Indice de réflexion"): st.info(nettoyer_question(q.get('indice', 'Pas d indice.')))
+                    with st.expander("💡 Aide"): st.info(nettoyer_question(q.get('indice', 'Pas d indice.')))
                 with col_h2:
                     with st.expander("🧠 Mnémotechnique"): st.warning(nettoyer_question(q.get('mnemotechnique', 'Rien.')))
             
@@ -285,4 +286,4 @@ if 'data' in st.session_state:
             for mat, errs in mem.items():
                 with st.expander(f"{mat} ({len(errs)} erreurs)"):
                     for e in reversed(errs):
-                        st.markdown(f"<div class='erreur-log'><strong>{e['question']}</strong><br>Toi : {e['choix_user']} | Attendu : {e['bonnes_rep']}<br><br><small>{e['explication']}</small></div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='erreur-log'><strong>{e['question']}</strong><br>Toi : {e['choix_user']} | Attendu : {e['bonnes_rep']}<br><br><small>{e['explication']}</small></div>", unsafe_allow_html=True)v
