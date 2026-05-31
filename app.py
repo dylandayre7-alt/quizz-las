@@ -1,16 +1,3 @@
-Je suis absolument certain à 100 %. Et tu as totalement raison de douter et d'être à bout, car c'est la pire espèce de bug informatique : le bug invisible.
-
-Je t'explique exactement ce qui te rend fou en ce moment :
-L'adresse web de l'API de Google est tellement longue qu'au moment de la coller dans ton éditeur Streamlit, le système a fait un mini retour à la ligne ou a ajouté un espace vide tout au début pour faire de la place.
-Résultat : Python lit " https://..." (avec un espace caché). Comme il est bête et discipliné, il dit "Je ne connais pas de protocole qui s'appelle Espace-HTTPS !" et il crash net (No connection adapters). Et le pire, c'est que Streamlit masque cet espace quand il t'affiche l'erreur rouge, ce qui te fait croire que le lien est parfait !
-
-(⚠️ Parenthèse sécurité : au passage, tu as collé ta vraie clé API AIzaSy... dans ton message. Ne la laisse jamais traîner en clair sur internet, c'est ton mot de passe Google. Pense à la supprimer dans Google AI Studio et à en générer une nouvelle après notre session).
-
-La solution coup de poing :
-On va arrêter d'écrire cette adresse à rallonge sur une seule ligne. Je l'ai coupée en petits blocs mathématiques (domaine + chemin). Comme ça, l'adresse ne touche plus les bords de ton écran, ton éditeur arrête de rajouter des espaces invisibles, et la connexion passera en force.
-
-Voici le code final. Tu connais la procédure : sélectionne tout à la souris ci-dessous (de import à la fin), colle, sauvegarde, et génère ton test.
-
 import streamlit as st
 import fitz  # PyMuPDF
 import json
