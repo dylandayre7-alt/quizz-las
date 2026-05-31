@@ -125,6 +125,7 @@ def generer_donnees_hybrides(txt_complet, texte_word, matiere, difficulte, nombr
     nb_ouverte = max(1, questions_par_chunk - nb_qcu)
     
     barre_progression = st.progress(0.0)
+    dernier_bug = "Aucune erreur détectée."
     
     for idx, chunk in enumerate(chunks_texte):
         if len(all_questions) >= nombre_qcm:
@@ -148,7 +149,6 @@ def generer_donnees_hybrides(txt_complet, texte_word, matiere, difficulte, nombr
             if rep.status_code == 200:
                 texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text'].strip()
                 
-                # Correction incassable : plus aucune expression régulière avec des backticks
                 texte_ia = texte_ia.replace("```json", "").replace("```", "").strip()
                 
                 donnees_chunk = json.loads(texte_ia, strict=False)
@@ -156,14 +156,18 @@ def generer_donnees_hybrides(txt_complet, texte_word, matiere, difficulte, nombr
             
             elif rep.status_code == 429:
                 time.sleep(4)
+            else:
+                raise Exception(f"Refus API {rep.status_code} : {rep.text}")
+                
         except Exception as e:
-            st.toast("Un bloc de pages a été ignoré suite à une erreur mineure de l'IA.", icon="⚠️")
+            dernier_bug = str(e)
+            st.toast(f"Alerte sur ce bloc de pages. Détail de l'erreur : {dernier_bug[:80]}...", icon="⚠️")
             pass
             
     barre_progression.empty()
     
     if not all_questions:
-        raise Exception("Aucune donnée n'a pu être générée. Vérifie que le PDF n'est pas uniquement composé d'images scannées.")
+        raise Exception(f"Échec total de la génération. Erreur interne remontée : {dernier_bug}")
         
     return {"questions": all_questions[:nombre_qcm]}
 
@@ -199,9 +203,14 @@ if f_pdf:
                 try:
                     txt = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                     txt_w = lire_word(f_word) if f_word else ""
-                    st.session_state['data'] = generer_donnees_hybrides(txt, txt_w, matiere, difficulte, nombre_qcm, mode_examen, api_key)
-                    st.session_state['examen_soumis'] = False
-                    st.rerun()
+                    
+                    # VERIFICATION DU PDF VIDE / SCAN :
+                    if len(txt.strip()) < 50 and len(txt_w.strip()) < 50:
+                        st.error("❌ Ton PDF semble vide ou est composé uniquement d'images/scans. L'application ne peut pas lire le texte dessus. Saisis tes notes dans un fichier Word et charge-le dans l'étape 2 !")
+                    else:
+                        st.session_state['data'] = generer_donnees_hybrides(txt, txt_w, matiere, difficulte, nombre_qcm, mode_examen, api_key)
+                        st.session_state['examen_soumis'] = False
+                        st.rerun()
                 except Exception as e: 
                     st.error(f"Incident technique : {e}")
 
