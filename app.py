@@ -8,9 +8,9 @@ import re
 import requests
 
 # ==============================================================================
-# 1. Configuration et Design Premium
+# 1. Configuration et Design Épuré Premium
 # ==============================================================================
-st.set_page_config(page_title="Prépa LAS 1 - Masterclass", page_icon="🎓", layout="wide")
+st.set_page_config(page_title="Prépa LAS 1 - Évaluation Intensive", page_icon="🎓", layout="wide")
 
 st.markdown("""
 <style>
@@ -18,21 +18,16 @@ st.markdown("""
     .stTabs [data-baseweb="tab"] { height: 50px; background-color: #f0f2f6; border-radius: 10px 10px 0 0; padding: 10px 20px; }
     .stTabs [aria-selected="true"] { background-color: #ff4b4b; color: white; font-weight: bold; }
     
-    .synth-box { padding: 30px; background-color: #1e1e1e; color: #ffffff; border-left: 8px solid #ff4b4b; border-radius: 15px; margin-bottom: 30px; line-height: 1.8; }
-    .synth-box h3 { color: #e74c3c !important; font-weight: bold; font-size: 1.4em; margin-top: 20px; border-bottom: 1px solid #444; padding-bottom: 5px; } 
-    .synth-box p, .synth-box li { color: #ffffff !important; font-size: 1.1em; }
-    
     .correct-box { background-color: #155724; padding: 15px; border-radius: 10px; margin-bottom: 10px; color: #d4edda; border: 1px solid #c3e6cb;}
     .error-box { background-color: #4a1317; padding: 15px; border-radius: 10px; margin-bottom: 10px; color: #f8d7da; border: 1px solid #f5c6cb;}
     .warning-box { background-color: #856404; padding: 15px; border-radius: 10px; margin-bottom: 10px; color: #ffeeba; border: 1px solid #ffeeba;}
     
     .erreur-log { border-left: 4px solid #ff4b4b; padding: 15px; margin-bottom: 15px; background-color: #2b2b2b; color: #ffffff; border-radius: 5px; border: 1px solid #444; }
-    .concept-card { background-color: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 5px solid #007bff; margin-bottom: 10px; color: #333; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Utilitaires & BOUCLIER ANTI-CRASH
+# 2. Utilitaires & Bouclier de Sauvetage
 # ==============================================================================
 if 'cahier_memoire' not in st.session_state:
     st.session_state['cahier_memoire'] = {}
@@ -48,14 +43,12 @@ def ajouter_erreur_session(matiere, question, choix_user, bonnes_rep, explicatio
 
 def assembler_texte_html(champ):
     texte = '<br><br>'.join([str(c) for c in champ]) if isinstance(champ, list) else str(champ)
-    texte = re.sub(r'###\s*(.*?)(<br>|$)', r'<h3>\1</h3>\2', texte)
     texte = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', texte)
     return texte
 
 def nettoyer_question(texte):
-    """ Filtre radical pour empêcher les balises HTML d'apparaître dans les questions """
     t = str(texte)
-    t = re.sub(r'</?h[1-6]>', '', t) # Supprime les <h3>, </h1> etc.
+    t = re.sub(r'</?h[1-6]>', '', t) 
     t = t.replace('<br>', ' ')
     t = t.replace('<strong>', '**').replace('</strong>', '**')
     return t.strip()
@@ -81,70 +74,55 @@ def sauvetage_json_coupe(texte_ia):
     except json.JSONDecodeError:
         if texte_propre.count('"') % 2 != 0:
             texte_propre += '"'
-            
-        tentatives = [']}', '"]}', '}', '}]}', '"]}]}']
+        tentatives = [']}', '}', ']}']
         for t in tentatives:
             try:
                 donnees_sauvees = json.loads(texte_propre + t, strict=False)
-                st.toast("⚠️ Le cours était si massif que l'IA a été coupée à la fin de la synthèse. Le reste a été sauvé avec succès !", icon="🛡️")
+                st.toast("🛡️ Le JSON a été automatiquement stabilisé par le système.", icon="🛡️")
                 return donnees_sauvees
             except:
                 pass
-                
-        coupe = texte_propre.rfind('","')
-        if coupe != -1:
-            try:
-                donnees_sauvees = json.loads(texte_propre[:coupe] + '"]}', strict=False)
-                st.toast("🛡️ Sauvetage d'urgence activé : La fin de la synthèse a été coupée, mais tes QCM sont sauvés.", icon="🛡️")
-                return donnees_sauvees
-            except:
-                pass
-                
-        raise Exception("Le document est beaucoup trop dense (plus de 8000 mots générés). Baisse légèrement le nombre de pages.")
+        raise Exception("Une erreur de structure est survenue. Relance simplement la génération.")
 
 # ==============================================================================
-# 3. Moteur IA (Format Mixte + Structure Inversée Sécurisée)
+# 3. Moteur IA (Focalisé 100% sur l'Évaluation)
 # ==============================================================================
 SYSTEM_PROMPT = """
-Tu es un Professeur expert en LAS 1.
+Tu es un Professeur expert en LAS 1. Ton unique but est d'évaluer l'étudiant de manière impitoyable sur le cours fourni.
 Matière : {matiere} | Difficulté : {difficulte}/10 
 Tu dois générer EXACTEMENT {nb_qcu} QCU (Choix Unique) et EXACTEMENT {nb_ouverte} Questions Ouvertes.
 
 RÈGLES DE FORMATAGE (CRITIQUE) :
-1. Réponds UNIQUEMENT avec un objet JSON valide.
+1. Réponds EXCLUSIVEMENT avec l'objet JSON demandé. Aucune phrase d'introduction.
 2. Échappe proprement les guillemets internes ou utilise des guillemets simples (').
-3. Utilise le HTML (<h3>, <strong>, <br>) EXCLUSIVEMENT pour la "fiche_synthese" et l'"explication".
-4. N'UTILISE JAMAIS AUCUNE BALISE HTML DANS LES CHAMPS "question" ET "options". Que du texte brut.
+3. N'UTILISE JAMAIS AUCUNE BALISE HTML DANS LES CHAMPS "question" ET "options". Que du texte brut.
+4. Utilise le HTML (<strong>, <br>) uniquement dans le champ "explication".
 
-MISSION (DANS CET ORDRE PRÉCIS POUR SÉCURISER LA MÉMOIRE) :
-1. QUESTIONS MIXTES : Fais-les en premier. 
-   - QCU : 5 propositions, UNE SEULE bonne réponse possible.
-   - OUVERTE : Question de réflexion, donne la réponse attendue et 3 à 5 mots-clés.
-2. CONCEPTS CLÉS : 5 fiches réflexes indispensables.
-3. COURS EXHAUSTIF (SYNTHÈSE) : Fais-le EN DERNIER. Retranscris tous les mécanismes. Privilégie les listes à puces. Structure avec <h3> et mots vitaux en rouge <span style='color:#ff4b4b'>...</span>.
+MISSION :
+Génère des questions de haute précision sur l'ensemble des notions de l'extrait du cours :
+- QCU : 5 propositions (A à E), UNE SEULE bonne réponse possible. Évite les questions trop simples.
+- OUVERTE : Question de réflexion rédactionnelle, donne la réponse attendue complète et 3 à 5 mots-clés de notation.
 
-FORMAT JSON STRICT (RESPECTE L'ORDRE) :
+FORMAT JSON STRICT (NE GÉNÈRE RIEN D'AUTRE) :
 {{
   "questions": [
     {{
       "type": "QCU",
-      "question": "Texte brut SANS balise HTML",
-      "options": {{"A": "Texte brut", "B": "Texte brut", "C": "Texte brut", "D": "Texte brut", "E": "Texte brut"}},
+      "question": "Texte de la question sans aucun HTML",
+      "options": {{"A": "Option A", "B": "Option B", "C": "Option C", "D": "Option D", "E": "Option E"}},
       "reponse_correcte": "A", 
       "explication": ["<strong>A) VRAI</strong> : ...", "<strong>B) FAUX</strong> : ..."], 
-      "indice": "...", "mnemotechnique": "..."
+      "indice": "Indice de décodage...", "mnemotechnique": "Astuce mémo..."
     }},
     {{
       "type": "OUVERTE",
-      "question": "Texte brut de la question",
-      "reponse_attendue": "...",
+      "question": "Texte de la question ouverte",
+      "reponse_attendue": "Réponse type attendue pour avoir tous les points",
       "mots_cles": ["mot1", "mot2", "mot3"],
-      "explication": ["..."],
-      "indice": "...", "mnemotechnique": "..."
+      "explication": ["Rappel physiologique ou légal lié à la question..."],
+      "indice": "Piste de réflexion...", "mnemotechnique": "Moyen mnémotechnique..."
     }}
-  ],
-  "concepts_cles": [{{"nom": "...", "role": "...", "objectif": "...", "avec_quoi": "...", "comment": "..."}}],
-  "fiche_synthese": ["<h3>...</h3>", "Explication détaillée..."]
+  ]
 }}
 """
 
@@ -156,7 +134,7 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
     
     payload = {
-        "contents": [{"parts": [{"text": prompt + "\nCOURS :\n" + texte_pdf}]}], 
+        "contents": [{"parts": [{"text": prompt + "\nCOURS EXTENSÉ À TRAITER :\n" + texte_pdf}]}], 
         "generationConfig": {
             "temperature": 0.3, 
             "maxOutputTokens": 8192,
@@ -168,7 +146,6 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     if rep.status_code != 200: raise Exception(f"Erreur Google : {rep.text}")
     
     texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text']
-    
     return sauvetage_json_coupe(texte_ia)
 
 # ==============================================================================
@@ -177,31 +154,31 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
 with st.sidebar:
     st.header("⚙️ Configuration")
     api_key = st.text_input("Clé API Gemini :", type="password")
-    matiere = st.selectbox("Matière :", ["Biologie / Biochimie", "Biostats", "Anatomie", "Pharmacologie", "Droit Médical"])
+    matiere = st.selectbox("Matière :", ["Biologie / Biochimie", "Épidémiologie / Biostats", "Anatomie", "Pharmacologie", "Droit Médical"])
     difficulte = st.slider("Difficulté :", 1, 10, 8)
-    nombre_qcm = st.number_input("Nombre de questions au total (80% QCU / 20% Rédaction) :", 1, 30, 10)
+    nombre_qcm = st.number_input("Nombre de questions (80% QCU / 20% Rédaction) :", 1, 30, 10)
     mode_examen = st.toggle("🚨 Activer le Mode Examen")
 
 # ==============================================================================
-# 5. Application
+# 5. Application Principale
 # ==============================================================================
-st.title("🎓 Simulateur LAS 1 (Anti-Crash 🛡️)")
+st.title("🎓 Entraînement Concours Intensif (Format Allégé Haute Capacité)")
 
 c1, c2 = st.columns(2)
-with c1: f_pdf = st.file_uploader("1. PDF du cours", type=['pdf'])
-with c2: f_word = st.file_uploader("2. Notes Word (Opt.)", type=['docx'])
+with c1: f_pdf = st.file_uploader("1. PDF du cours complet", type=['pdf'])
+with c2: f_word = st.file_uploader("2. Notes complémentaires Word (Opt.)", type=['docx'])
 
 if f_pdf:
     doc_t = fitz.open(stream=f_pdf.read(), filetype="pdf")
     p_tot = len(doc_t)
     doc_t.close()
     
-    p_deb, p_fin = st.slider("Pages :", 1, p_tot, (1, p_tot))
+    p_deb, p_fin = st.slider("Sélectionner la plage de pages :", 1, p_tot, (1, p_tot))
     
-    if st.button("🚀 Générer la session incassable", type="primary", use_container_width=True):
+    if st.button("🚀 Générer l'évaluation du bloc complet", type="primary", use_container_width=True):
         if not api_key: st.error("Clé API manquante !")
         else:
-            with st.spinner("Analyse approfondie en cours (Protection Anti-Crash activée)..."):
+            with st.spinner("Extraction globale et ciblage des pièges en cours..."):
                 try:
                     txt = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                     txt_w = lire_word(f_word) if f_word else ""
@@ -210,34 +187,27 @@ if f_pdf:
                     st.rerun()
                 except Exception as e: st.error(f"❌ {e}")
 
+# ==============================================================================
+# 6. Affichage des Questions & Corrections
+# ==============================================================================
 if 'data' in st.session_state:
     data = st.session_state['data']
-    t1, t2, t3, t4 = st.tabs(["📖 Fiche Magistrale", "🎯 Concepts Clés", "✍️ Entraînement", "📓 Cahier d'Erreurs"])
+    t1, t2 = st.tabs(["✍️ Entraînement", "📓 Mon Cahier d'Erreurs"])
 
-    with t1: st.markdown(f"<div class='synth-box'>{assembler_texte_html(data.get('fiche_synthese', ''))}</div>", unsafe_allow_html=True)
-
-    with t2:
-        for c in data.get('concepts_cles', []):
-            with st.expander(f"🧩 {c.get('nom', 'Concept')}"):
-                st.markdown(f"<div class='concept-card'><strong>Rôle:</strong> {c.get('role')}<br><strong>Objectif:</strong> {c.get('objectif')}<br><strong>Comment:</strong> {c.get('comment')}</div>", unsafe_allow_html=True)
-
-    with t3:
+    with t1:
         liste_questions = data.get('questions', [])
         
-        # --- PHASE DE RÉPONSE ---
         if not st.session_state.get('examen_soumis'):
             for i, q in enumerate(liste_questions):
                 type_q = q.get('type', 'QCU')
-                # NETTOYAGE AUTO DE LA QUESTION ICI
                 question_propre = nettoyer_question(q.get('question', ''))
                 
                 st.markdown(f"**Question {i+1}** 🔹 *{type_q}* : {question_propre}", unsafe_allow_html=True)
                 
-                # Interface QCU (Boutons Radio)
                 if type_q == "QCU":
                     opts = q.get('options', {})
                     choix = st.radio(
-                        "Choisis la bonne proposition :", 
+                        "Coche l'unique proposition exacte :", 
                         options=list(opts.keys()), 
                         format_func=lambda x: f"{x}. {nettoyer_question(opts[x])}",
                         index=None,
@@ -245,26 +215,24 @@ if 'data' in st.session_state:
                     )
                     st.session_state[f"choix_{i}"] = choix
                 
-                # Interface Question Ouverte (Champ de texte)
                 elif type_q == "OUVERTE":
-                    reponse_ouverte = st.text_area("✍️ Rédige ta réponse complète ici :", key=f"ouv_{i}", height=150)
+                    reponse_ouverte = st.text_area("✍️ Saisis ta démonstration / réponse rédigée :", key=f"ouv_{i}", height=120)
                     st.session_state[f"choix_{i}"] = reponse_ouverte
                 
                 if not mode_examen:
                     col_h1, col_h2 = st.columns(2)
                     with col_h1:
-                        with st.expander("💡 Aide (Indice)"): st.info(nettoyer_question(q.get('indice', 'Pas d indice.')))
+                        with st.expander("💡 Indice de réflexion"): st.info(nettoyer_question(q.get('indice', 'Pas d indice.')))
                     with col_h2:
-                        with st.expander("🧠 Mémorisation Active"): st.warning(f"**Point d'ancrage :** {nettoyer_question(q.get('mnemotechnique', ''))}")
+                        with st.expander("🧠 Point d'ancrage mémo"): st.warning(f"{nettoyer_question(q.get('mnemotechnique', 'Aucune astuce spécifiée.'))}")
                 
                 st.divider()
             
-            texte_btn = "🏁 Valider ma copie" if mode_examen else "✅ Tout corriger"
+            texte_btn = "🏁 Soumettre la copie" if mode_examen else "✅ Valider mes réponses"
             if st.button(texte_btn, type="primary", use_container_width=True): 
                 st.session_state['examen_soumis'] = True
                 st.rerun()
                 
-        # --- PHASE DE CORRECTION ---
         else:
             score_qcu = 0
             total_qcu = 0
@@ -274,7 +242,6 @@ if 'data' in st.session_state:
                 mon_choix = st.session_state.get(f"choix_{i}")
                 question_propre = nettoyer_question(q.get('question', ''))
                 
-                # Correction QCU
                 if type_q == "QCU":
                     total_qcu += 1
                     bonne_rep = q.get('reponse_correcte', '')
@@ -283,40 +250,43 @@ if 'data' in st.session_state:
                     if juste: score_qcu += 1
                     else: ajouter_erreur_session(matiere, question_propre, str(mon_choix), bonne_rep, assembler_texte_html(q.get('explication')))
                     
-                    st.markdown(f"<div class='{'correct-box' if juste else 'error-box'}'><strong>Q{i+1} (QCU) : {'✅ VRAI' if juste else '❌ FAUX'}</strong><br>{question_propre}</div>", unsafe_allow_html=True)
-                    st.write(f"Ton choix : **{mon_choix if mon_choix else 'Aucune réponse'}** | La bonne réponse était : **{bonne_rep}**")
-                    with st.expander("Voir l'explication complète"): st.markdown(assembler_texte_html(q.get('explication')), unsafe_allow_html=True)
+                    st.markdown(f"<div class='{'correct-box' if juste else 'error-box'}'><strong>Q{i+1} (QCU) : {'✅ CORRECT' if juste else '❌ ERREUR'}</strong><br>{question_propre}</div>", unsafe_allow_html=True)
+                    st.write(f"Ton choix : **{mon_choix if mon_choix else 'Blanc'}** | Réponse attendue : **{bonne_rep}**")
+                    with st.expander("Analyse des propositions"): st.markdown(assembler_texte_html(q.get('explication')), unsafe_allow_html=True)
                 
-                # Correction Question Ouverte
                 elif type_q == "OUVERTE":
                     mots_cles = q.get('mots_cles', [])
                     reponse_user = str(mon_choix) if mon_choix else ""
-                    
                     mots_trouves = [mot for mot in mots_cles if mot.lower() in reponse_user.lower()]
                     ratio_mots = len(mots_trouves) / max(1, len(mots_cles))
                     
                     if ratio_mots >= 0.5:
-                        st.markdown(f"<div class='correct-box'><strong>Q{i+1} (Rédaction) : ✅ Bonne réflexion globale</strong><br>{question_propre}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='correct-box'><strong>Q{i+1} (Rédaction) : ✅ Cohérence sémantique validée</strong><br>{question_propre}</div>", unsafe_allow_html=True)
                     else:
-                        st.markdown(f"<div class='warning-box'><strong>Q{i+1} (Rédaction) : ⚠️ Incomplet ou imprécis</strong><br>{question_propre}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='warning-box'><strong>Q{i+1} (Rédaction) : ⚠️ Restitution incomplète ou imprécise</strong><br>{question_propre}</div>", unsafe_allow_html=True)
                         ajouter_erreur_session(matiere, question_propre, reponse_user[:50]+"...", ", ".join(mots_cles), assembler_texte_html(q.get('explication')))
 
-                    st.write(f"**Ta rédaction :** {reponse_user if reponse_user else '*Aucune réponse fournie*'}")
-                    st.markdown(f"**Mots-clés attendus :** {', '.join(mots_cles)} *(Tu as trouvé : {len(mots_trouves)}/{len(mots_cles)})*")
+                    st.write(f"**Ta production :** {reponse_user if reponse_user else '*Copie blanche*'}")
+                    st.markdown(f"**Mots-clés requis au concours :** {', '.join(mots_cles)} *(Identifiés dans ta copie : {len(mots_trouves)}/{len(mots_cles)})*")
                     
-                    with st.expander("Voir la correction type du Professeur"): 
-                        st.success(f"**Réponse attendue :**<br>{nettoyer_question(q.get('reponse_attendue'))}")
+                    with st.expander("Consulter la grille de correction officielle"): 
+                        st.success(f"**Modèle de réponse attendu :**<br>{nettoyer_question(q.get('reponse_attendue'))}")
                         st.markdown(assembler_texte_html(q.get('explication')), unsafe_allow_html=True)
 
-            if total_qcu > 0:
-                st.metric("Score sur les QCU", f"{(score_qcu/total_qcu)*20:.1f} / 20")
-            else:
-                st.metric("Score", "Évaluation basée sur la rédaction")
-                
-            if st.button("Nouveau test"): st.session_state['examen_soumis'] = False; st.rerun()
+            if total_qcu > 0: st.metric("Note QCU", f"{(score_qcu/total_qcu)*20:.1f} / 20")
+            if st.button("Lancer une nouvelle évaluation"): st.session_state['examen_soumis'] = False; st.rerun()
 
-    with t4:
-        for mat, errs in st.session_state.get('cahier_memoire', {}).items():
-            with st.expander(f"{mat} ({len(errs)} erreurs)"):
+    with t2:
+        mem = st.session_state.get('cahier_memoire', {})
+        if not mem: st.info("Excellent travail, aucune anomalie enregistrée dans le cahier d'erreurs.")
+        for mat, errs in mem.items():
+            with st.expander(f"Matière : {mat} ({len(errs)} fautes stockées)"):
                 for e in reversed(errs):
-                    st.markdown(f"<div class='erreur-log'><strong>{e['question']}</strong><br>Toi : {e['choix_user']} | Attendu : {e['bonnes_rep']}<br><br><small>{e['explication']}</small></div>", unsafe_allow_html=True)
+                    st.markdown(f"""
+                    <div class='erreur-log'>
+                        <strong>{e['question']}</strong><br>
+                        <span style='color:#ff4b4b'>Saisie étudiant : {e['choix_user']}</span> | 
+                        <span style='color:#28a745'>Validé : {e['bonnes_rep']}</span><br>
+                        <small>{e['explication']}</small>
+                    </div>
+                    """, unsafe_allow_html=True)
