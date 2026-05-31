@@ -6,6 +6,7 @@ import docx
 from datetime import datetime
 import re
 import requests
+import time # Nécessaire pour la boucle d'auto-guérison
 
 # ==============================================================================
 # 1. Configuration et Design Premium de l'Application
@@ -67,15 +68,8 @@ def lire_word(buffer_fichier):
     doc = docx.Document(buffer_fichier)
     return " ".join([para.text for para in doc.paragraphs])
 
-def extraire_et_charger_json(texte_ia):
-    debut = texte_ia.find('{')
-    fin = texte_ia.rfind('}') + 1
-    if debut == -1 or fin == 0:
-        raise Exception("L'IA n'a pas renvoyé une structure de données exploitable. Relance l'analyse.")
-    return json.loads(texte_ia[debut:fin].strip(), strict=False)
-
 # ==============================================================================
-# 3. Moteur IA (Format de Distribution Strict QCU / Ouvertes)
+# 3. Moteur IA (Aves Boucle de Sauvetage Automatique)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en LAS 1. Ton unique objectif est d'évaluer l'étudiant de manière rigoureuse sur le cours fourni.
@@ -118,8 +112,7 @@ FORMAT JSON REQUIS :
 }}
 """
 
-def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key):
-    # Calcul rigoureux du ratio 80% QCU et 20% Ouvertes
+def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key, max_tentatives=3):
     nb_qcu = max(1, round(nombre_qcm * 0.8))
     nb_ouverte = max(1, nombre_qcm - nb_qcu)
     total_reels = nb_qcu + nb_ouverte
@@ -136,10 +129,35 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
         }
     }
     
-    rep = requests.post(url, json=payload)
-    if rep.status_code != 200: raise Exception(f"Erreur d'accès aux serveurs de calcul : {rep.text}")
-    
-    return extraire_et_charger_json(rep.json()['candidates'][0]['content']['parts'][0]['text'])
+    # BOUCLE D'AUTO-GUÉRISON : On donne 3 chances à l'IA de fournir un JSON parfait
+    for essai in range(max_tentatives):
+        try:
+            rep = requests.post(url, json=payload)
+            if rep.status_code != 200: 
+                raise Exception(f"Erreur d'accès aux serveurs Google : {rep.text}")
+            
+            texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text']
+            
+            # Extraction propre du JSON
+            debut = texte_ia.find('{')
+            fin = texte_ia.rfind('}') + 1
+            if debut == -1 or fin == 0:
+                raise Exception("JSON introuvable.")
+                
+            json_brut = texte_ia[debut:fin].strip()
+            
+            # On tente de le lire informatiquement
+            return json.loads(json_brut, strict=False)
+            
+        except json.JSONDecodeError as e:
+            # Si l'IA a oublié une virgule, on relance en silence (sauf si c'est la 3ème fois)
+            if essai == max_tentatives - 1:
+                raise Exception(f"L'IA a généré un texte trop dense avec une erreur de formatage ({e}). Astuce : Demandez moins de questions ou sélectionnez moins de pages.")
+            time.sleep(2) # On patiente 2 secondes avant de relancer la requête
+        except Exception as e:
+            if essai == max_tentatives - 1:
+                raise e
+            time.sleep(2)
 
 # ==============================================================================
 # 4. Interface Menu Configuration
@@ -172,7 +190,7 @@ if f_pdf:
         if not api_key: 
             st.error("Action impossible : Clé API absente de la configuration.")
         else:
-            with st.spinner("Analyse sémantique et génération des questions en cours..."):
+            with st.spinner("Analyse en cours (Auto-correction des bugs activée en arrière-plan)..."):
                 try:
                     txt = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                     txt_w = lire_word(f_word) if f_word else ""
@@ -228,13 +246,16 @@ if 'data' in st.session_state:
             if is_disabled:
                 if type_q == "QCU":
                     bonne_rep = q.get('reponse_correcte', '')
+                    
+                    # On évite le crash si l'étudiant valide sans cocher
+                    choix_propre = choix if choix else "Aucune réponse"
                     juste = (choix == bonne_rep and choix is not None)
                     
                     if juste:
                         st.markdown(f"<div class='correct-box'>✅ <b>Proposition Exacte !</b> La réponse attendue était bien la lettre {bonne_rep}.</div>", unsafe_allow_html=True)
                     else:
-                        st.markdown(f"<div class='error-box'>❌ <b>Discordance Détectée !</b> Vous avez coché la lettre {choix if choix else 'Blanc'}. L'affirmation vraie était la {bonne_rep}.</div>", unsafe_allow_html=True)
-                        ajouter_erreur_session(matiere, question_propre, str(choix), bonne_rep, assembler_texte_html(q.get('explication')))
+                        st.markdown(f"<div class='error-box'>❌ <b>Discordance Détectée !</b> Vous avez coché la lettre {choix_propre}. L'affirmation vraie était la {bonne_rep}.</div>", unsafe_allow_html=True)
+                        ajouter_erreur_session(matiere, question_propre, str(choix_propre), bonne_rep, assembler_texte_html(q.get('explication')))
                     
                     with st.expander("Consulter le rapport d'analyse détaillé"): 
                         st.markdown(assembler_texte_html(q.get('explication')), unsafe_allow_html=True)
