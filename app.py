@@ -18,9 +18,9 @@ st.markdown("""
     .stTabs [data-baseweb="tab"] { height: 50px; background-color: #f0f2f6; border-radius: 10px 10px 0 0; padding: 10px 20px; }
     .stTabs [aria-selected="true"] { background-color: #ff4b4b; color: white; font-weight: bold; }
     
-    .correct-box { background-color: #155724; padding: 15px; border-radius: 10px; margin-bottom: 10px; color: #d4edda; border: 1px solid #c3e6cb;}
-    .error-box { background-color: #4a1317; padding: 15px; border-radius: 10px; margin-bottom: 10px; color: #f8d7da; border: 1px solid #f5c6cb;}
-    .warning-box { background-color: #856404; padding: 15px; border-radius: 10px; margin-bottom: 10px; color: #ffeeba; border: 1px solid #ffeeba;}
+    .correct-box { background-color: #155724; padding: 15px; border-radius: 10px; margin-top: 10px; margin-bottom: 10px; color: #d4edda; border: 1px solid #c3e6cb;}
+    .error-box { background-color: #4a1317; padding: 15px; border-radius: 10px; margin-top: 10px; margin-bottom: 10px; color: #f8d7da; border: 1px solid #f5c6cb;}
+    .warning-box { background-color: #856404; padding: 15px; border-radius: 10px; margin-top: 10px; margin-bottom: 10px; color: #ffeeba; border: 1px solid #ffeeba;}
     
     .erreur-log { border-left: 4px solid #ff4b4b; padding: 15px; margin-bottom: 15px; background-color: #2b2b2b; color: #ffffff; border-radius: 5px; border: 1px solid #444; }
 </style>
@@ -97,13 +97,17 @@ def sauvetage_json_coupe(texte_ia):
         raise Exception("Le document a généré un code trop complexe et a saturé la mémoire. Baisse le nombre de pages.")
 
 # ==============================================================================
-# 3. Moteur IA (Nettoyage militaire URL + Clé)
+# 3. Moteur IA (Haute Qualité & Variété des questions)
 # ==============================================================================
 SYSTEM_PROMPT = """
-Tu es un Professeur expert en LAS 1. Ton unique but est d'évaluer l'étudiant.
+Tu es un Professeur expert en LAS 1. Ton unique but est d'évaluer l'étudiant avec un niveau d'exigence de concours.
 Matière : {matiere} | Difficulté : {difficulte}/10 
 
 Tu dois générer EXACTEMENT {nb_qcu} questions "QCU" et EXACTEMENT {nb_ouverte} questions "OUVERTE".
+
+RÈGLES DE RÉDACTION (VARIÉTÉ DES QUESTIONS) :
+1. Varie les plaisirs ! Alterne entre des questions directes très classiques (ex: "Concernant X, quelle est la proposition exacte ?") pour valider le par cœur, et des questions plus avancées (mini-cas cliniques, scénarios, déductions logiques) pour tester la réflexion.
+2. Garde un bon équilibre pour que l'entraînement soit à la fois complet et dynamique.
 
 RÈGLES INFORMATIQUES CRITIQUES :
 1. Réponds UNIQUEMENT via un objet JSON valide.
@@ -139,20 +143,18 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     
     prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nb_qcu=nb_qcu, nb_ouverte=nb_ouverte)
     
-    # KÄRCHER ABSOLU SUR LA CLÉ ET L'URL
     cle_propre = re.sub(r'[^a-zA-Z0-9_-]', '', api_key)
-    url_brute = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
-    url_propre = re.sub(r'[^a-zA-Z0-9:/\.-]', '', url_brute)
+    url_base = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
     
     payload = {
         "contents": [{"parts": [{"text": prompt + "\nCOURS :\n" + texte_pdf + "\nNOTES :\n" + texte_word}]}], 
         "generationConfig": {
-            "temperature": 0.2, 
+            "temperature": 0.3, 
             "maxOutputTokens": 8192
         }
     }
     
-    rep = requests.post(url_propre, params={"key": cle_propre}, json=payload)
+    rep = requests.post(url_base, params={"key": cle_propre}, json=payload)
     
     if rep.status_code != 200: 
         raise Exception(f"Erreur API Google ({rep.status_code}) : {rep.text}")
@@ -210,6 +212,9 @@ if 'data' in st.session_state:
         liste_questions = data.get('questions', [])
         is_disabled = st.session_state.get('examen_soumis', False)
         
+        score_qcu = 0
+        total_qcu = 0
+        
         for i, q in enumerate(liste_questions):
             type_q = q.get('type', 'QCU')
             question_propre = nettoyer_question(q.get('question', ''))
@@ -239,11 +244,13 @@ if 'data' in st.session_state:
             
             if is_disabled:
                 if type_q == "QCU":
+                    total_qcu += 1
                     bonne_rep = q.get('reponse_correcte', '')
                     choix_str = choix if choix else "Blanc"
                     juste = (choix == bonne_rep and choix is not None)
                     
                     if juste:
+                        score_qcu += 1
                         st.markdown(f"<div class='correct-box'>✅ <b>VRAI !</b> La réponse attendue était bien {bonne_rep}.</div>", unsafe_allow_html=True)
                     else:
                         st.markdown(f"<div class='error-box'>❌ <b>FAUX !</b> Tu as coché {choix_str}. La bonne réponse était {bonne_rep}.</div>", unsafe_allow_html=True)
@@ -269,13 +276,18 @@ if 'data' in st.session_state:
                         st.markdown(assembler_texte_html(q.get('explication')), unsafe_allow_html=True)
             st.divider()
             
-        if not is_disabled:
-            if st.button("🏁 Valider ma copie", type="primary", use_container_width=True): 
-                st.session_state['examen_soumis'] = True
-                st.rerun()
-        else:
+        if is_disabled:
+            if total_qcu > 0:
+                st.metric("🎯 Note sur les QCU", f"{(score_qcu/total_qcu)*20:.1f} / 20")
+            else:
+                st.metric("🎯 Note", "Évaluation basée sur la rédaction")
+                
             if st.button("🔄 Lancer un nouveau test", use_container_width=True): 
                 st.session_state['examen_soumis'] = False
+                st.rerun()
+        else:
+            if st.button("🏁 Valider ma copie", type="primary", use_container_width=True): 
+                st.session_state['examen_soumis'] = True
                 st.rerun()
 
     with t2:
@@ -287,4 +299,3 @@ if 'data' in st.session_state:
                 with st.expander(f"{mat} ({len(errs)} erreurs)"):
                     for e in reversed(errs):
                         st.markdown(f"<div class='erreur-log'><strong>{e['question']}</strong><br>Toi : {e['choix_user']} | Attendu : {e['bonnes_rep']}<br><br><small>{e['explication']}</small></div>", unsafe_allow_html=True)
-                        
