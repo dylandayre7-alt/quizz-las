@@ -27,14 +27,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Utilitaires & Bouclier de Sauvetage
+# 2. Utilitaires & Bouclier de Sauvetage Blindé
 # ==============================================================================
 if 'cahier_memoire' not in st.session_state:
     st.session_state['cahier_memoire'] = {}
 
 def ajouter_erreur_session(matiere, question, choix_user, bonnes_rep, explication):
     if matiere not in st.session_state['cahier_memoire']:
-        st.session_state['cahier_memoire'][matiere] = []
+        st.session_state['cahier_memoire'] = []
     if not any(err['question'] == question for err in st.session_state['cahier_memoire'][matiere]):
         st.session_state['cahier_memoire'][matiere].append({
             "date": datetime.now().strftime("%d/%m/%Y"), "question": question,
@@ -65,50 +65,67 @@ def lire_word(buffer_fichier):
     return " ".join([para.text for para in doc.paragraphs])
 
 def sauvetage_json_coupe(texte_ia):
-    texte_propre = texte_ia.strip()
-    texte_propre = re.sub(r'^```[a-zA-Z]*\n', '', texte_propre)
-    texte_propre = re.sub(r'```$', '', texte_propre).strip()
+    # 1. On cherche où commence vraiment le code
+    debut = texte_ia.find('{')
+    if debut == -1:
+        raise Exception("Google n'a généré aucune donnée valide. Relance la génération.")
+        
+    # 2. On isole le bloc
+    texte_brut = texte_ia[debut:]
     
+    # 3. On nettoie la fin si le code a été encapsulé dans des balises
+    texte_brut = re.sub(r'```[a-zA-Z]*$', '', texte_brut)
+    texte_brut = re.sub(r'```$', '', texte_brut).strip()
+
     try:
-        return json.loads(texte_propre, strict=False)
+        # Essai propre
+        return json.loads(texte_brut, strict=False)
     except json.JSONDecodeError:
-        if texte_propre.count('"') % 2 != 0:
-            texte_propre += '"'
-        tentatives = [']}', '}', ']}']
-        for t in tentatives:
+        # 4. MODE URGENCE : L'IA a cassé la structure (guillemet interdit ou coupure)
+        tentatives_fermeture = ['}', ']}', '"]}', '}]}', '"]}]}']
+        for t in tentatives_fermeture:
             try:
-                donnees_sauvees = json.loads(texte_propre + t, strict=False)
-                st.toast("🛡️ Le JSON a été automatiquement stabilisé par le système.", icon="🛡️")
-                return donnees_sauvees
+                donnees = json.loads(texte_brut + t, strict=False)
+                st.toast("🛡️ Le code a été automatiquement réparé (Coupure de fin).", icon="🛡️")
+                return donnees
             except:
                 pass
-        raise Exception("Une erreur de structure est survenue. Relance simplement la génération.")
+        
+        # 5. MODE HACHOIR : Si le code est pourri au milieu, on coupe à la dernière question valide
+        derniere_accolade = texte_brut.rfind('}')
+        if derniere_accolade != -1:
+            try:
+                donnees = json.loads(texte_brut[:derniere_accolade+1] + ']}', strict=False)
+                st.toast("🛡️ La fin de l'évaluation était corrompue, mais les premières questions ont été sauvées.", icon="🛡️")
+                return donnees
+            except:
+                pass
+                
+        raise Exception("L'IA a inséré des guillemets illégaux qui ont détruit la structure informatique. Relance avec une page de moins.")
 
 # ==============================================================================
 # 3. Moteur IA (Focalisé 100% sur l'Évaluation)
 # ==============================================================================
 SYSTEM_PROMPT = """
-Tu es un Professeur expert en LAS 1. Ton unique but est d'évaluer l'étudiant de manière impitoyable sur le cours fourni.
+Tu es un Professeur expert en LAS 1. Ton unique but est d'évaluer l'étudiant sur le cours fourni.
 Matière : {matiere} | Difficulté : {difficulte}/10 
 Tu dois générer EXACTEMENT {nb_qcu} QCU (Choix Unique) et EXACTEMENT {nb_ouverte} Questions Ouvertes.
 
-RÈGLES DE FORMATAGE (CRITIQUE) :
-1. Réponds EXCLUSIVEMENT avec l'objet JSON demandé. Aucune phrase d'introduction.
-2. Échappe proprement les guillemets internes ou utilise des guillemets simples (').
-3. N'UTILISE JAMAIS AUCUNE BALISE HTML DANS LES CHAMPS "question" ET "options". Que du texte brut.
-4. Utilise le HTML (<strong>, <br>) uniquement dans le champ "explication".
+RÈGLES INFORMATIQUES CRITIQUES (SOUS PEINE DE CRASH TOTAL) :
+1. N'UTILISE AUCUN GUILLEMET DOUBLE (") À L'INTÉRIEUR DE TES PHRASES. C'est formellement interdit. Remplace-les TOUS par des apostrophes simples (').
+2. N'utilise le HTML (<strong>, <br>) QUE dans le champ "explication". 
+3. Les champs "question" et "options" doivent être du TEXTE BRUT TOTALEMENT LISSE.
 
 MISSION :
-Génère des questions de haute précision sur l'ensemble des notions de l'extrait du cours :
-- QCU : 5 propositions (A à E), UNE SEULE bonne réponse possible. Évite les questions trop simples.
-- OUVERTE : Question de réflexion rédactionnelle, donne la réponse attendue complète et 3 à 5 mots-clés de notation.
+- QCU : 5 propositions (A à E), UNE SEULE bonne réponse possible.
+- OUVERTE : Question de réflexion, donne la réponse attendue complète et 3 à 5 mots-clés obligatoires.
 
-FORMAT JSON STRICT (NE GÉNÈRE RIEN D'AUTRE) :
+FORMAT JSON STRICT :
 {{
   "questions": [
     {{
       "type": "QCU",
-      "question": "Texte de la question sans aucun HTML",
+      "question": "Texte brut de la question",
       "options": {{"A": "Option A", "B": "Option B", "C": "Option C", "D": "Option D", "E": "Option E"}},
       "reponse_correcte": "A", 
       "explication": ["<strong>A) VRAI</strong> : ...", "<strong>B) FAUX</strong> : ..."], 
@@ -119,7 +136,7 @@ FORMAT JSON STRICT (NE GÉNÈRE RIEN D'AUTRE) :
       "question": "Texte de la question ouverte",
       "reponse_attendue": "Réponse type attendue pour avoir tous les points",
       "mots_cles": ["mot1", "mot2", "mot3"],
-      "explication": ["Rappel physiologique ou légal lié à la question..."],
+      "explication": ["Rappel physiologique..."],
       "indice": "Piste de réflexion...", "mnemotechnique": "Moyen mnémotechnique..."
     }}
   ]
@@ -162,7 +179,7 @@ with st.sidebar:
 # ==============================================================================
 # 5. Application Principale
 # ==============================================================================
-st.title("🎓 Entraînement Concours Intensif (Format Allégé Haute Capacité)")
+st.title("🎓 Entraînement Concours Intensif (Format Allégé)")
 
 c1, c2 = st.columns(2)
 with c1: f_pdf = st.file_uploader("1. PDF du cours complet", type=['pdf'])
@@ -175,7 +192,7 @@ if f_pdf:
     
     p_deb, p_fin = st.slider("Sélectionner la plage de pages :", 1, p_tot, (1, p_tot))
     
-    if st.button("🚀 Générer l'évaluation du bloc complet", type="primary", use_container_width=True):
+    if st.button("🚀 Générer l'évaluation", type="primary", use_container_width=True):
         if not api_key: st.error("Clé API manquante !")
         else:
             with st.spinner("Extraction globale et ciblage des pièges en cours..."):
