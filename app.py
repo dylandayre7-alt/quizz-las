@@ -127,6 +127,9 @@ def generer_donnees_hybrides(txt_complet, texte_word, matiere, difficulte, nombr
     barre_progression = st.progress(0.0)
     dernier_bug = "Aucune erreur détectée."
     
+    # NETTOYAGE CRITIQUE DE LA CLÉ API ICI
+    api_key_propre = api_key.strip()
+    
     for idx, chunk in enumerate(chunks_texte):
         if len(all_questions) >= nombre_qcm:
             break
@@ -134,7 +137,7 @@ def generer_donnees_hybrides(txt_complet, texte_word, matiere, difficulte, nombr
         barre_progression.progress(idx / len(chunks_texte))
         
         prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nb_qcu=nb_qcu, nb_ouverte=nb_ouverte)
-        url = f"[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=){api_key}"
+        url = f"[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=){api_key_propre}"
         
         payload = {
             "contents": [{"parts": [{"text": prompt + "\\nNOTES WORD EXTRA:\\n" + (texte_word or "") + "\\n\\nEXTRAIT DU COURS :\\n" + chunk}]}],
