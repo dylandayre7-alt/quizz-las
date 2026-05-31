@@ -286,4 +286,5 @@ if 'data' in st.session_state:
             for mat, errs in mem.items():
                 with st.expander(f"{mat} ({len(errs)} erreurs)"):
                     for e in reversed(errs):
-                        st.markdown(f"<div class='erreur-log'><strong>{e['question']}</strong><br>Toi : {e['choix_user']} | Attendu : {e['bonnes_rep']}<br><br><small>{e['explication']}</small></div>", unsafe_allow_html=True)v
+                        st.markdown(f"<div class='erreur-log'><strong>{e['question']}</strong><br>Toi : {e['choix_user']} | Attendu : {e['bonnes_rep']}<br><br><small>{e['explication']}</small></div>", unsafe_allow_html=True)
+                        
