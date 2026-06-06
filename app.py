@@ -27,7 +27,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Utilitaires & Bouclier de Sauvetage
+# 2. Utilitaires & Bouclier de Sauvetage Amélioré
 # ==============================================================================
 if 'cahier_memoire' not in st.session_state:
     st.session_state['cahier_memoire'] = {}
@@ -66,28 +66,31 @@ def lire_word(buffer_fichier):
 
 def sauvetage_json_coupe(texte_ia):
     debut = texte_ia.find('{')
-    if debut == -1:
-        raise Exception("L'IA n'a pas renvoyé de format lisible. Relance l'analyse avec moins de pages.")
+    fin = texte_ia.rfind('}')
+    
+    if debut == -1 or fin == -1:
+        raise Exception("L'IA n'a pas renvoyé de format lisible. Baisse le nombre de questions (ex: 5).")
         
-    texte_brut = texte_ia[debut:]
-    texte_brut = re.sub(r'```[a-zA-Z]*$', '', texte_brut)
-    texte_brut = re.sub(r'```$', '', texte_brut).strip()
+    # Extraction pure et dure du bloc JSON
+    texte_brut = texte_ia[debut:fin+1]
 
     try:
         return json.loads(texte_brut, strict=False)
     except json.JSONDecodeError:
+        # Si ça casse, on tente de réparer les fermetures
         tentatives_fermeture = ['}', ']}', '"]}', '}]}', '"]}]}']
         for t in tentatives_fermeture:
             try:
                 donnees = json.loads(texte_brut + t, strict=False)
-                st.toast("🛡️ Le JSON a été réparé automatiquement.", icon="🛡️")
+                st.toast("🛡️ Le JSON a été réparé automatiquement (Coupure de fin).", icon="🛡️")
                 return donnees
             except:
                 pass
-        raise Exception("Le document a généré un code trop complexe. Baisse le nombre de pages.")
+                
+        raise Exception("Le document a généré un code trop complexe. Baisse le nombre de questions et de pages.")
 
 # ==============================================================================
-# 3. Moteur IA (100% Questions Ouvertes & Moteur 2.5 d'origine)
+# 3. Moteur IA (100% Questions Ouvertes avec protection anti-crash)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en LAS 1. Ton unique but est d'évaluer l'étudiant avec un niveau d'exigence de concours.
@@ -96,13 +99,13 @@ Matière : {matiere} | Difficulté : {difficulte}/10
 Tu dois générer EXACTEMENT {nb_ouverte} questions de type "OUVERTE". NE GÉNÈRE AUCUNE QUESTION À CHOIX MULTIPLE (QCU).
 
 RÈGLES DE RÉDACTION :
-1. Rédige des questions exigeantes : mini-cas cliniques, scénarios de réflexion, ou questions de synthèse nécessitant une vraie restitution des connaissances du cours.
+1. Rédige des questions exigeantes : mini-cas cliniques, scénarios de réflexion, ou questions de synthèse.
 2. L'étudiant doit structurer sa pensée et utiliser les bons mots-clés scientifiques ou juridiques.
 
-RÈGLES INFORMATIQUES CRITIQUES :
+RÈGLES INFORMATIQUES CRITIQUES POUR ÉVITER LES BUGS :
 1. Réponds UNIQUEMENT via un objet JSON valide.
 2. N'utilise JAMAIS de guillemets doubles (") dans tes phrases. Remplace-les par des apostrophes (').
-3. Aucun HTML dans les champs "question".
+3. INTERDICTION ABSOLUE D'UTILISER DES SAUTS DE LIGNE (Enter/Retour à la ligne) À L'INTÉRIEUR DES TEXTES. Écris tout sur une seule et même ligne continue par champ.
 
 FORMAT JSON REQUIS :
 {{
@@ -121,12 +124,11 @@ FORMAT JSON REQUIS :
 """
 
 def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key):
-    # 100% des questions demandées seront des questions ouvertes
     nb_ouverte = nombre_qcm 
     prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nb_ouverte=nb_ouverte)
     
     cle_propre = re.sub(r'[^a-zA-Z0-9_-]', '', api_key)
-    # RETOUR AU MOTEUR D'ORIGINE : Gemini 2.5 Flash
+    # MOTEUR OFFICIEL : Gemini 2.5 Flash
     url_base = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
     
     payload = {
@@ -150,7 +152,8 @@ with st.sidebar:
     api_key = st.text_input("Clé API Gemini :", type="password")
     matiere = st.selectbox("Matière :", ["Biologie / Biochimie", "Épidémiologie / Biostats", "Anatomie", "Pharmacologie", "Droit Médical"])
     difficulte = st.slider("Niveau de pièges :", 1, 10, 8)
-    nombre_qcm = st.number_input("Nombre de questions (100% Ouvertes) :", 1, 30, 10)
+    st.info("💡 Pour les questions ouvertes, limite-toi à 5 ou 10 questions max par évaluation.")
+    nombre_qcm = st.number_input("Nombre de questions (100% Ouvertes) :", 1, 30, 5)
     mode_examen = st.toggle("🚨 Mode Examen (Masquer les indices)")
 
 st.title("🎓 Simulateur LAS 1 (Entraînement Rédactionnel)")
@@ -163,12 +166,14 @@ if f_pdf:
     doc_t = fitz.open(stream=f_pdf.read(), filetype="pdf")
     p_tot = len(doc_t)
     doc_t.close()
-    p_deb, p_fin = st.slider("Pages :", 1, p_tot, (1, min(10, p_tot)))
+    
+    st.warning("⚠️ Astuce : Analyse des petits blocs de cours (3 à 6 pages maximum) pour des questions précises et éviter de saturer l'IA.")
+    p_deb, p_fin = st.slider("Pages à analyser :", 1, p_tot, (1, min(5, p_tot)))
     
     if st.button("🚀 Lancer l'évaluation", type="primary", use_container_width=True):
         if not api_key: st.error("Clé API manquante !")
         else:
-            with st.spinner("Génération des questions de réflexion en cours..."):
+            with st.spinner("Génération des cas cliniques et questions de réflexion..."):
                 try:
                     txt = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                     txt_w = lire_word(f_word) if f_word else ""
@@ -191,7 +196,6 @@ if 'data' in st.session_state:
             
             st.markdown(f"**Question {i+1}** 🔹 *RÉDACTION* : {question_propre}")
             
-            # Uniquement des champs de texte libre
             reponse_ouverte = st.text_area("✍️ Saisis ta réponse complète :", key=f"ouv_{i}", height=120, disabled=is_disabled)
             
             if not is_disabled and not mode_examen:
