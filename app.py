@@ -87,7 +87,7 @@ def sauvetage_json_coupe(texte_ia):
         raise Exception("Le document a généré un code trop complexe. Baisse le nombre de pages.")
 
 # ==============================================================================
-# 3. Moteur IA (100% Questions Ouvertes)
+# 3. Moteur IA (100% Questions Ouvertes & Moteur 2.5 d'origine)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en LAS 1. Ton unique but est d'évaluer l'étudiant avec un niveau d'exigence de concours.
@@ -126,8 +126,8 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nb_ouverte=nb_ouverte)
     
     cle_propre = re.sub(r'[^a-zA-Z0-9_-]', '', api_key)
-    # L'adresse officielle et vérifiée pour Gemini 1.5 Flash
-    url_base = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-001:generateContent"
+    # RETOUR AU MOTEUR D'ORIGINE : Gemini 2.5 Flash
+    url_base = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
     
     payload = {
         "contents": [{"parts": [{"text": prompt + "\nCOURS :\n" + texte_pdf + "\nNOTES :\n" + texte_word}]}], 
