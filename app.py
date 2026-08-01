@@ -27,7 +27,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Utilitaires & Bouclier de Sauvetage Amélioré (Correction du Bug)
+# 2. Utilitaires & Bouclier de Sauvetage Amélioré
 # ==============================================================================
 if 'cahier_memoire' not in st.session_state:
     st.session_state['cahier_memoire'] = {}
@@ -137,7 +137,9 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nb_qcm=nombre_qcm)
     
     cle_propre = re.sub(r'[^a-zA-Z0-9_-]', '', api_key)
-    url_base = "[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent)"
+    
+    # CORRECTION BUG URL : Utilisation de .strip() pour enlever les espaces invisibles
+    url_base = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent".strip()
     
     payload = {
         "contents": [{"parts": [{"text": prompt + "\nCOURS :\n" + texte_pdf + "\nNOTES :\n" + texte_word}]}], 
@@ -145,7 +147,7 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     }
     
     rep = requests.post(url_base, params={"key": cle_propre}, json=payload)
-    if rep.status_code != 200: raise Exception(f"Erreur API : {rep.text}")
+    if rep.status_code != 200: raise Exception(f"Erreur API ({rep.status_code}) : {rep.text}")
     
     texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text']
     return sauvetage_json_coupe(texte_ia)
@@ -180,9 +182,9 @@ if f_pdf:
         
         if bouton_generer:
             if not api_key: 
-                st.error("Clé API manquante !")
+                st.error("Clé API manquante ! Renseigne-la dans la barre latérale.")
             else:
-                with st.spinner("Création des questions à choix multiples..."):
+                with st.spinner("Création des questions à choix multiples en cours..."):
                     try:
                         txt = extraire_texte_pdf(f_pdf, p_deb, p_fin)
                         txt_w = lire_word(f_word) if f_word else ""
