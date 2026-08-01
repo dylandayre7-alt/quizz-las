@@ -27,7 +27,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Utilitaires & Bouclier de Sauvetage Amélioré
+# 2. Utilitaires & Bouclier de Sauvetage Amélioré (Correction du Bug)
 # ==============================================================================
 if 'cahier_memoire' not in st.session_state:
     st.session_state['cahier_memoire'] = {}
@@ -65,13 +65,16 @@ def lire_word(buffer_fichier):
     return " ".join([para.text for para in doc.paragraphs])
 
 def sauvetage_json_coupe(texte_ia):
-    debut = texte_ia.find('{')
-    fin = texte_ia.rfind('}')
-    
-    if debut == -1 or fin == -1:
-        raise Exception("L'IA n'a pas renvoyé de format lisible. Baisse le nombre de questions (ex: 5).")
-        
-    texte_brut = texte_ia[debut:fin+1]
+    # CORRECTION BUG : Nettoyage des balises Markdown de l'IA (ex: ```json ... ```)
+    match = re.search(r'```(?:json)?(.*?)```', texte_ia, re.DOTALL)
+    if match:
+        texte_brut = match.group(1).strip()
+    else:
+        debut = texte_ia.find('{')
+        fin = texte_ia.rfind('}')
+        if debut == -1 or fin == -1:
+            raise Exception("L'IA n'a pas renvoyé de format lisible. Baisse le nombre de questions.")
+        texte_brut = texte_ia[debut:fin+1]
 
     try:
         return json.loads(texte_brut, strict=False)
@@ -80,44 +83,51 @@ def sauvetage_json_coupe(texte_ia):
         for t in tentatives_fermeture:
             try:
                 donnees = json.loads(texte_brut + t, strict=False)
-                st.toast("🛡️ Le JSON a été réparé automatiquement.", icon="🛡️")
                 return donnees
             except:
                 pass
-                
-        raise Exception("Le document a généré un code trop complexe. Baisse le nombre de questions et de pages.")
+        raise Exception("Le document a généré un code trop complexe.")
 
 # ==============================================================================
-# 3. Moteur IA (100% QCM - Orienté Vétérinaire)
+# 3. Moteur IA (QRM Ciblés : Étiologie, Pathogénie, Clinique...)
 # ==============================================================================
 SYSTEM_PROMPT = """
-Tu es un Professeur expert en médecine vétérinaire, gestion de clinique et nutrition animale. Ton unique but est d'évaluer l'étudiant de manière rigoureuse sur ses cours.
+Tu es un Professeur expert en biologie vétérinaire, parasitologie, pathologie et nutrition animale. 
 Matière : {matiere} | Difficulté : {difficulte}/10 
 
-Tu dois générer EXACTEMENT {nb_qcm} questions à choix multiple (QCM) basées STRICTEMENT sur le texte fourni par l'étudiant. 
-Si le texte parle de la gale sarcoptique, tu dois faire des questions précises dessus (ex: "Quelle est la classe du parasite responsable de la gale sarcoptique ?").
+Génère EXACTEMENT {nb_qcm} questions à choix multiples (QRM) basées STRICTEMENT sur le cours fourni.
+ATTENTION : Il peut y avoir UNE OU PLUSIEURS bonnes réponses par question.
+
+OBLIGATION ABSOLUE : Tes questions DOIVENT cibler de manière extrêmement précise ces domaines (selon ce qui est présent dans le texte) :
+1. Étiologie : Famille, Règne, Phylum, Classe, Ordre, Genre, Espèce, et Localisation (ex: "Quelle est la classe de Sarcoptes scabiei ?").
+2. Épidémiologie (ex: "Quels sont les facteurs favorisants de X ?").
+3. Signes cliniques (ex: "Quels sont les signes cliniques associés à Y ?").
+4. Diagnostic (ex: "Quelles méthodes permettent le diagnostic de Z ?").
+5. Traitement et Prévention.
+6. Cycle parasitaire / Cycle de vie.
+7. Pathologie / Pathogénie.
 
 RÈGLES DE RÉDACTION :
-1. Rédige des questions précises et techniques (taxonomie, signes cliniques, cycles de vie, etc.).
-2. Propose toujours 4 choix de réponses (choix_1, choix_2, choix_3, choix_4), dont UNE SEULE est correcte.
-3. Assure-toi que la "bonne_reponse" corresponde EXACTEMENT au texte de l'un des 4 choix.
+1. Propose toujours 4 ou 5 choix de réponses.
+2. Crée des pièges intelligents (ex: confondre l'Ordre et la Famille, ou un stade larvaire).
+3. La clé "bonnes_reponses" doit être une LISTE contenant le ou les textes EXACTS des choix corrects.
 
-RÈGLES INFORMATIQUES CRITIQUES POUR ÉVITER LES BUGS :
+RÈGLES INFORMATIQUES CRITIQUES :
 1. Réponds UNIQUEMENT via un objet JSON valide.
 2. N'utilise JAMAIS de guillemets doubles (") dans tes phrases. Remplace-les par des apostrophes (').
-3. INTERDICTION ABSOLUE D'UTILISER DES SAUTS DE LIGNE (Enter/Retour à la ligne) À L'INTÉRIEUR DES TEXTES. Écris tout sur une seule et même ligne continue par champ.
+3. Écris tout sur une seule ligne continue par champ.
 
 FORMAT JSON REQUIS :
 {{
   "questions": [
     {{
-      "type": "QCM",
-      "question": "Énoncé textuel de la question...",
-      "choix": ["Choix 1", "Choix 2", "Choix 3", "Choix 4"],
-      "bonne_reponse": "Le texte exact de la bonne réponse",
-      "explication": ["Explication scientifique issue du cours..."],
-      "indice": "Piste de réflexion pour guider l'étudiant...",
-      "mnemotechnique": "Astuce ou moyen mnémotechnique..."
+      "type": "QRM",
+      "question": "Concernant Sarcoptes scabiei, quelles propositions sur son étiologie sont exactes ?",
+      "choix": ["Il appartient au phylum des Nematoda", "Il appartient à la classe des Arachnidia", "Il cause la gale sarcoptique", "Il se localise dans le caecum"],
+      "bonnes_reponses": ["Il appartient à la classe des Arachnidia", "Il cause la gale sarcoptique"],
+      "explication": ["Rappel du cours et justification technique..."],
+      "indice": "Piste de réflexion...",
+      "mnemotechnique": "Astuce..."
     }}
   ]
 }}
@@ -127,7 +137,7 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nb_qcm=nombre_qcm)
     
     cle_propre = re.sub(r'[^a-zA-Z0-9_-]', '', api_key)
-    url_base = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    url_base = "[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent)"
     
     payload = {
         "contents": [{"parts": [{"text": prompt + "\nCOURS :\n" + texte_pdf + "\nNOTES :\n" + texte_word}]}], 
@@ -135,25 +145,23 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     }
     
     rep = requests.post(url_base, params={"key": cle_propre}, json=payload)
-    
-    if rep.status_code != 200: 
-        raise Exception(f"Erreur API ({rep.status_code}) : {rep.text}")
+    if rep.status_code != 200: raise Exception(f"Erreur API : {rep.text}")
     
     texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text']
     return sauvetage_json_coupe(texte_ia)
 
 # ==============================================================================
-# 4. Interface Graphique (Adaptée pour les QCM)
+# 4. Interface Graphique (Avec Formulaire de Génération pour éviter le Bug)
 # ==============================================================================
 with st.sidebar:
     st.header("⚙️ Configuration")
     api_key = st.text_input("Clé API Gemini :", type="password")
-    matiere = st.selectbox("Matière :", ["Parasitologie Vétérinaire", "Nutrition animale", "Gestion de clinique", "Pharmacologie", "Anatomie"])
+    matiere = st.selectbox("Matière :", ["Parasitologie / Pathologie", "Nutrition animale", "Biologie vétérinaire", "Gestion de clinique"])
     difficulte = st.slider("Niveau de pièges :", 1, 10, 8)
-    nombre_qcm = st.number_input("Nombre de QCM :", 1, 30, 10)
+    nombre_qcm = st.number_input("Nombre de Questions :", 1, 30, 10)
     mode_examen = st.toggle("🚨 Mode Examen (Masquer les indices)")
 
-st.title("🐾 Simulateur d'Entraînement Vétérinaire")
+st.title("🐾 Simulateur d'Entraînement Vétérinaire (Choix Multiples)")
 
 c1, c2 = st.columns(2)
 with c1: f_pdf = st.file_uploader("1. PDF du cours", type=['pdf'])
@@ -164,20 +172,26 @@ if f_pdf:
     p_tot = len(doc_t)
     doc_t.close()
     
-    st.warning("⚠️ Astuce : Analyse des petits blocs de cours (3 à 6 pages maximum).")
-    p_deb, p_fin = st.slider("Pages à analyser :", 1, p_tot, (1, min(5, p_tot)))
-    
-    if st.button("🚀 Générer le QCM", type="primary", use_container_width=True):
-        if not api_key: st.error("Clé API manquante !")
-        else:
-            with st.spinner("Analyse du cours et création des QCM en cours..."):
-                try:
-                    txt = extraire_texte_pdf(f_pdf, p_deb, p_fin)
-                    txt_w = lire_word(f_word) if f_word else ""
-                    st.session_state['data'] = generer_donnees(txt, txt_w, matiere, difficulte, nombre_qcm, mode_examen, api_key)
-                    st.session_state['examen_soumis'] = False
-                    st.rerun()
-                except Exception as e: st.error(f"❌ {e}")
+    # CORRECTION BUG : Utilisation d'un formulaire pour forcer l'exécution propre
+    with st.form("formulaire_generation"):
+        st.warning("⚠️ Astuce : Analyse des petits blocs de cours (3 à 6 pages maximum).")
+        p_deb, p_fin = st.slider("Pages à analyser :", 1, p_tot, (1, min(5, p_tot)))
+        bouton_generer = st.form_submit_button("🚀 Générer le Test", type="primary", use_container_width=True)
+        
+        if bouton_generer:
+            if not api_key: 
+                st.error("Clé API manquante !")
+            else:
+                with st.spinner("Création des questions à choix multiples..."):
+                    try:
+                        txt = extraire_texte_pdf(f_pdf, p_deb, p_fin)
+                        txt_w = lire_word(f_word) if f_word else ""
+                        st.session_state['data'] = generer_donnees(txt, txt_w, matiere, difficulte, nombre_qcm, mode_examen, api_key)
+                        st.session_state['examen_soumis'] = False
+                        st.session_state['reponses_utilisateur'] = {} # Réinitialise les réponses
+                        st.rerun()
+                    except Exception as e: 
+                        st.error(f"❌ {e}")
 
 if 'data' in st.session_state:
     data = st.session_state['data']
@@ -187,28 +201,28 @@ if 'data' in st.session_state:
         liste_questions = data.get('questions', [])
         is_disabled = st.session_state.get('examen_soumis', False)
         
-        # Dictionnaire pour stocker les réponses de l'utilisateur
-        if 'reponses_qcm' not in st.session_state:
-            st.session_state['reponses_qcm'] = {}
+        if 'reponses_utilisateur' not in st.session_state:
+            st.session_state['reponses_utilisateur'] = {}
         
         for i, q in enumerate(liste_questions):
             question_propre = nettoyer_question(q.get('question', ''))
             st.markdown(f"**Question {i+1}** 🔹 {question_propre}")
+            st.caption("*Il peut y avoir plusieurs bonnes réponses.*")
             
             choix = q.get('choix', [])
             
-            # Affichage des choix sous forme de boutons radio
-            reponse_user = st.radio(
-                "Sélectionne ta réponse :", 
-                choix, 
-                key=f"qcm_{i}", 
-                disabled=is_disabled,
-                index=None
-            )
+            # Stockage des sélections pour cette question
+            if f"q_{i}" not in st.session_state['reponses_utilisateur']:
+                st.session_state['reponses_utilisateur'][f"q_{i}"] = []
+                
+            reponses_cochees = []
+            for j, choix_texte in enumerate(choix):
+                coche = st.checkbox(choix_texte, key=f"chk_{i}_{j}", disabled=is_disabled)
+                if coche:
+                    reponses_cochees.append(choix_texte)
             
-            # Sauvegarde de la réponse dans la session
-            if reponse_user:
-                st.session_state['reponses_qcm'][f"qcm_{i}"] = reponse_user
+            # Mise à jour dans la session
+            st.session_state['reponses_utilisateur'][f"q_{i}"] = reponses_cochees
             
             if not is_disabled and not mode_examen:
                 col_h1, col_h2 = st.columns(2)
@@ -219,14 +233,17 @@ if 'data' in st.session_state:
             
             # Phase de correction
             if is_disabled:
-                reponse_soumise = st.session_state['reponses_qcm'].get(f"qcm_{i}", "Aucune réponse")
-                bonne_rep = str(q.get('bonne_reponse', ''))
+                reponse_soumise = set(st.session_state['reponses_utilisateur'].get(f"q_{i}", []))
+                bonnes_reps = set(q.get('bonnes_reponses', []))
                 
-                if reponse_soumise == bonne_rep:
-                    st.markdown(f"<div class='correct-box'>✅ <b>Bonne réponse !</b></div>", unsafe_allow_html=True)
+                # Vérification stricte : il faut avoir coché TOUTES les bonnes réponses et AUCUNE mauvaise
+                if reponse_soumise == bonnes_reps and len(bonnes_reps) > 0:
+                    st.markdown(f"<div class='correct-box'>✅ <b>Parfait !</b></div>", unsafe_allow_html=True)
                 else:
-                    st.markdown(f"<div class='error-box'>❌ <b>Erreur.</b> La bonne réponse était : <b>{bonne_rep}</b></div>", unsafe_allow_html=True)
-                    ajouter_erreur_session(matiere, question_propre, reponse_soumise, bonne_rep, assembler_texte_html(q.get('explication')))
+                    rep_str = "Aucune" if not reponse_soumise else " | ".join(reponse_soumise)
+                    bonnes_str = " | ".join(bonnes_reps)
+                    st.markdown(f"<div class='error-box'>❌ <b>Incomplet ou faux.</b><br>Tes choix : {rep_str}<br><b>Réponses attendues : {bonnes_str}</b></div>", unsafe_allow_html=True)
+                    ajouter_erreur_session(matiere, question_propre, rep_str, bonnes_str, assembler_texte_html(q.get('explication')))
                 
                 with st.expander("Correction détaillée et Explications"): 
                     st.markdown(assembler_texte_html(q.get('explication')), unsafe_allow_html=True)
@@ -236,19 +253,19 @@ if 'data' in st.session_state:
             st.info("🎓 **Évaluation terminée.** Tes erreurs ont été enregistrées dans le cahier.")
             if st.button("🔄 Lancer un nouveau test", use_container_width=True): 
                 st.session_state['examen_soumis'] = False
-                st.session_state['reponses_qcm'] = {} # On réinitialise les réponses
+                st.session_state['reponses_utilisateur'] = {}
                 st.rerun()
         else:
-            if st.button("🏁 Corriger mon QCM", type="primary", use_container_width=True): 
+            if st.button("🏁 Corriger le test", type="primary", use_container_width=True): 
                 st.session_state['examen_soumis'] = True
                 st.rerun()
 
     with t2:
         mem = st.session_state.get('cahier_memoire', {})
         if not mem: 
-            st.info("Aucune erreur enregistrée pour le moment. Fais un sans-faute !")
+            st.info("Aucune erreur enregistrée.")
         else:
             for mat, errs in mem.items():
                 with st.expander(f"{mat} ({len(errs)} erreurs)"):
                     for e in reversed(errs):
-                        st.markdown(f"<div class='erreur-log'><strong>{e['question']}</strong><br>Ta réponse : {e['choix_user']} <br> Attendu : <b>{e['bonnes_rep']}</b><br><br><small>{e['explication']}</small></div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='erreur-log'><strong>{e['question']}</strong><br>Ta sélection : {e['choix_user']} <br> <b>Attendu : {e['bonnes_rep']}</b><br><br><small>{e['explication']}</small></div>", unsafe_allow_html=True)
