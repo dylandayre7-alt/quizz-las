@@ -6,6 +6,7 @@ import docx
 from datetime import datetime
 import re
 import requests
+import base64  # <-- NOUVEAU : Nécessaire pour envoyer les images à l'IA
 
 # ==============================================================================
 # 1. Configuration et Design Premium
@@ -53,19 +54,28 @@ def nettoyer_question(texte):
     t = t.replace('<strong>', '**').replace('</strong>', '**')
     return t.strip()
 
-def extraire_texte_pdf(buffer_fichier, page_debut, page_fin):
+# <-- NOUVELLE FONCTION : Transforme les pages PDF en images pour l'IA
+def extraire_images_pdf(buffer_fichier, page_debut, page_fin):
     buffer_fichier.seek(0)
     doc = fitz.open(stream=buffer_fichier.read(), filetype="pdf")
-    texte = "".join([f" PAGE {i+1} " + doc[i].get_text("text") for i in range(page_debut - 1, min(page_fin, len(doc)))])
+    images_parts = []
+    for i in range(page_debut - 1, min(page_fin, len(doc))):
+        pix = doc[i].get_pixmap(matrix=fitz.Matrix(1.5, 1.5)) # Qualité optimale pour lire ton écriture
+        img_b64 = base64.b64encode(pix.tobytes("jpeg")).decode("utf-8")
+        images_parts.append({
+            "inlineData": {
+                "mimeType": "image/jpeg",
+                "data": img_b64
+            }
+        })
     doc.close()
-    return texte
+    return images_parts
 
 def lire_word(buffer_fichier):
     doc = docx.Document(buffer_fichier)
     return " ".join([para.text for para in doc.paragraphs])
 
 def sauvetage_json_coupe(texte_ia):
-    # CORRECTION BUG : Nettoyage des balises Markdown de l'IA (ex: ```json ... ```)
     match = re.search(r'```(?:json)?(.*?)```', texte_ia, re.DOTALL)
     if match:
         texte_brut = match.group(1).strip()
@@ -89,13 +99,14 @@ def sauvetage_json_coupe(texte_ia):
         raise Exception("Le document a généré un code trop complexe.")
 
 # ==============================================================================
-# 3. Moteur IA (QRM Ciblés : Étiologie, Pathogénie, Clinique...)
+# 3. Moteur IA (QRM Ciblés & Support Visuel)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur expert en biologie vétérinaire, parasitologie, pathologie et nutrition animale. 
 Matière : {matiere} | Difficulté : {difficulte}/10 
 
-Génère EXACTEMENT {nb_qcm} questions à choix multiples (QRM) basées STRICTEMENT sur le cours fourni.
+Génère EXACTEMENT {nb_qcm} questions à choix multiples (QRM) basées STRICTEMENT sur les images du cours manuscrit fourni.
+Lis attentivement l'écriture manuscrite et les schémas.
 ATTENTION : Il peut y avoir UNE OU PLUSIEURS bonnes réponses par question.
 
 OBLIGATION ABSOLUE : Tes questions DOIVENT cibler de manière extrêmement précise ces domaines (selon ce qui est présent dans le texte) :
@@ -133,16 +144,21 @@ FORMAT JSON REQUIS :
 }}
 """
 
-def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key):
+def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key):
     prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nb_qcm=nombre_qcm)
     
     cle_propre = re.sub(r'[^a-zA-Z0-9_-]', '', api_key)
-    
-    # CORRECTION BUG URL : Utilisation de .strip() pour enlever les espaces invisibles
     url_base = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent".strip()
     
+    # <-- NOUVEAU : On injecte les images du PDF directement dans la requête
+    parts = [{"text": prompt + "\nVoici les pages du cours à analyser :\n"}]
+    parts.extend(images_pdf)
+    
+    if texte_word:
+        parts.append({"text": "\nNOTES SUPPLÉMENTAIRES :\n" + texte_word})
+        
     payload = {
-        "contents": [{"parts": [{"text": prompt + "\nCOURS :\n" + texte_pdf + "\nNOTES :\n" + texte_word}]}], 
+        "contents": [{"parts": parts}], 
         "generationConfig": {"temperature": 0.2, "maxOutputTokens": 8192}
     }
     
@@ -153,7 +169,7 @@ def generer_donnees(texte_pdf, texte_word, matiere, difficulte, nombre_qcm, est_
     return sauvetage_json_coupe(texte_ia)
 
 # ==============================================================================
-# 4. Interface Graphique (Avec Formulaire de Génération pour éviter le Bug)
+# 4. Interface Graphique
 # ==============================================================================
 with st.sidebar:
     st.header("⚙️ Configuration")
@@ -174,7 +190,6 @@ if f_pdf:
     p_tot = len(doc_t)
     doc_t.close()
     
-    # CORRECTION BUG : Utilisation d'un formulaire pour forcer l'exécution propre
     with st.form("formulaire_generation"):
         st.warning("⚠️ Astuce : Analyse des petits blocs de cours (3 à 6 pages maximum).")
         p_deb, p_fin = st.slider("Pages à analyser :", 1, p_tot, (1, min(5, p_tot)))
@@ -184,13 +199,13 @@ if f_pdf:
             if not api_key: 
                 st.error("Clé API manquante ! Renseigne-la dans la barre latérale.")
             else:
-                with st.spinner("Création des questions à choix multiples en cours..."):
+                with st.spinner("Lecture de tes notes manuscrites et création des QRM..."):
                     try:
-                        txt = extraire_texte_pdf(f_pdf, p_deb, p_fin)
+                        images = extraire_images_pdf(f_pdf, p_deb, p_fin)
                         txt_w = lire_word(f_word) if f_word else ""
-                        st.session_state['data'] = generer_donnees(txt, txt_w, matiere, difficulte, nombre_qcm, mode_examen, api_key)
+                        st.session_state['data'] = generer_donnees(images, txt_w, matiere, difficulte, nombre_qcm, mode_examen, api_key)
                         st.session_state['examen_soumis'] = False
-                        st.session_state['reponses_utilisateur'] = {} # Réinitialise les réponses
+                        st.session_state['reponses_utilisateur'] = {} 
                         st.rerun()
                     except Exception as e: 
                         st.error(f"❌ {e}")
@@ -213,7 +228,6 @@ if 'data' in st.session_state:
             
             choix = q.get('choix', [])
             
-            # Stockage des sélections pour cette question
             if f"q_{i}" not in st.session_state['reponses_utilisateur']:
                 st.session_state['reponses_utilisateur'][f"q_{i}"] = []
                 
@@ -223,7 +237,6 @@ if 'data' in st.session_state:
                 if coche:
                     reponses_cochees.append(choix_texte)
             
-            # Mise à jour dans la session
             st.session_state['reponses_utilisateur'][f"q_{i}"] = reponses_cochees
             
             if not is_disabled and not mode_examen:
@@ -233,12 +246,10 @@ if 'data' in st.session_state:
                 with col_h2:
                     with st.expander("🧠 Mnémotechnique"): st.warning(nettoyer_question(q.get('mnemotechnique', 'Rien.')))
             
-            # Phase de correction
             if is_disabled:
                 reponse_soumise = set(st.session_state['reponses_utilisateur'].get(f"q_{i}", []))
                 bonnes_reps = set(q.get('bonnes_reponses', []))
                 
-                # Vérification stricte : il faut avoir coché TOUTES les bonnes réponses et AUCUNE mauvaise
                 if reponse_soumise == bonnes_reps and len(bonnes_reps) > 0:
                     st.markdown(f"<div class='correct-box'>✅ <b>Parfait !</b></div>", unsafe_allow_html=True)
                 else:
