@@ -96,7 +96,7 @@ def sauvetage_json_coupe(texte_ia):
         raise Exception("L'IA a généré un texte trop long ou corrompu. Baisse le nombre de questions (ex: 5).")
 
 # ==============================================================================
-# 3. Moteur IA (Spécialisé Infectiologie & JSON Forcé)
+# 3. Moteur IA (Spécialisé Infectiologie & JSON Forcé & Anti-Proxy)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur de médecine vétérinaire, spécialisé EXCLUSIVEMENT en biologie infectieuse, virologie, bactériologie, parasitologie et pathologie.
@@ -145,9 +145,10 @@ def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est
     prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nb_qcm=nombre_qcm)
     cle_propre = re.sub(r'[^a-zA-Z0-9_-]', '', api_key)
     
-    # NETTOYAGE EXTRÊME : Destruction des caractères invisibles
-    url_brute = "[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent)"
-    url_base = url_brute.encode('ascii', 'ignore').decode('ascii').strip()
+    # FIX : Forcer Gemini 2.5 Flash avec séparation propre pour éviter les sauts de ligne cachés
+    domaine = "[https://generativelanguage.googleapis.com](https://generativelanguage.googleapis.com)"
+    endpoint = "/v1beta/models/gemini-2.5-flash:generateContent"
+    url_base = f"{domaine}{endpoint}"
     
     parts = [{"text": prompt + "\nVoici les pages du cours à analyser :\n"}]
     parts.extend(images_pdf)
@@ -163,7 +164,11 @@ def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est
         }
     }
     
-    rep = requests.post(url_base, params={"key": cle_propre}, json=payload)
+    # FIX RESEAU : On force la requête à ignorer les proxys système
+    session = requests.Session()
+    session.trust_env = False
+    
+    rep = session.post(url_base, params={"key": cle_propre}, json=payload)
     if rep.status_code != 200: raise Exception(f"Erreur API ({rep.status_code}) : {rep.text}")
     
     texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text']
