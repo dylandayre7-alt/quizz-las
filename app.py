@@ -76,7 +76,6 @@ def lire_word(buffer_fichier):
 
 def sauvetage_json_coupe(texte_ia):
     try:
-        # Nettoyage de sécurité au cas où l'IA mettrait quand même des balises
         texte_propre = texte_ia.strip()
         if texte_propre.startswith("```json"):
             texte_propre = texte_propre[7:]
@@ -87,7 +86,6 @@ def sauvetage_json_coupe(texte_ia):
         
         return json.loads(texte_propre.strip(), strict=False)
     except json.JSONDecodeError:
-        # Ultime tentative de réparation
         debut = texte_ia.find('{')
         fin = texte_ia.rfind('}')
         if debut != -1 and fin != -1:
@@ -146,7 +144,9 @@ FORMAT JSON REQUIS (Tout sur une seule ligne par champ, pas de doubles guillemet
 def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key):
     prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nb_qcm=nombre_qcm)
     cle_propre = re.sub(r'[^a-zA-Z0-9_-]', '', api_key)
-    url_base = "[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent)".strip()
+    
+    # URL propre sur une seule ligne stricte
+    url_base = "[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent)"
     
     parts = [{"text": prompt + "\nVoici les pages du cours à analyser :\n"}]
     parts.extend(images_pdf)
