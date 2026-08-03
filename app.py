@@ -6,12 +6,12 @@ import docx
 from datetime import datetime
 import re
 import requests
-import base64  # <-- NOUVEAU : Nécessaire pour envoyer les images à l'IA
+import base64
 
 # ==============================================================================
 # 1. Configuration et Design Premium
 # ==============================================================================
-st.set_page_config(page_title="Révisions Vétérinaires", page_icon="🐾", layout="wide")
+st.set_page_config(page_title="Masterclass Vétérinaire", page_icon="🐾", layout="wide")
 
 st.markdown("""
 <style>
@@ -54,13 +54,12 @@ def nettoyer_question(texte):
     t = t.replace('<strong>', '**').replace('</strong>', '**')
     return t.strip()
 
-# <-- NOUVELLE FONCTION : Transforme les pages PDF en images pour l'IA
 def extraire_images_pdf(buffer_fichier, page_debut, page_fin):
     buffer_fichier.seek(0)
     doc = fitz.open(stream=buffer_fichier.read(), filetype="pdf")
     images_parts = []
     for i in range(page_debut - 1, min(page_fin, len(doc))):
-        pix = doc[i].get_pixmap(matrix=fitz.Matrix(1.5, 1.5)) # Qualité optimale pour lire ton écriture
+        pix = doc[i].get_pixmap(matrix=fitz.Matrix(1.5, 1.5)) 
         img_b64 = base64.b64encode(pix.tobytes("jpeg")).decode("utf-8")
         images_parts.append({
             "inlineData": {
@@ -83,7 +82,7 @@ def sauvetage_json_coupe(texte_ia):
         debut = texte_ia.find('{')
         fin = texte_ia.rfind('}')
         if debut == -1 or fin == -1:
-            raise Exception("L'IA n'a pas renvoyé de format lisible. Baisse le nombre de questions.")
+            raise Exception("L'IA n'a pas renvoyé de format lisible.")
         texte_brut = texte_ia[debut:fin+1]
 
     try:
@@ -99,45 +98,45 @@ def sauvetage_json_coupe(texte_ia):
         raise Exception("Le document a généré un code trop complexe.")
 
 # ==============================================================================
-# 3. Moteur IA (QRM Ciblés & Support Visuel)
+# 3. Moteur IA (Spécialisé Infectiologie & Comptage Strict)
 # ==============================================================================
 SYSTEM_PROMPT = """
-Tu es un Professeur expert en biologie vétérinaire, parasitologie, pathologie et nutrition animale. 
-Matière : {matiere} | Difficulté : {difficulte}/10 
+Tu es un Professeur de médecine vétérinaire, spécialisé EXCLUSIVEMENT en biologie infectieuse, virologie, bactériologie, parasitologie et pathologie.
+Matière : {matiere} | Difficulté : {difficulte}/10 (Niveau Concours très exigeant).
 
-Génère EXACTEMENT {nb_qcm} questions à choix multiples (QRM) basées STRICTEMENT sur les images du cours manuscrit fourni.
-Lis attentivement l'écriture manuscrite et les schémas.
-ATTENTION : Il peut y avoir UNE OU PLUSIEURS bonnes réponses par question.
+MISSION ET COMPTAGE STRICT (CORRECTION DE BUG) :
+Tu dois générer EXACTEMENT ET STRICTEMENT {nb_qcm} questions à réponses multiples (QRM).
+Tu dois numéroter mentalement chaque question générée. Dès que tu atteins la question numéro {nb_qcm}, TU DOIS ARRÊTER LA GÉNÉRATION. Pas une de plus, pas une de moins.
 
-OBLIGATION ABSOLUE : Tes questions DOIVENT cibler de manière extrêmement précise ces domaines (selon ce qui est présent dans le texte) :
-1. Étiologie : Famille, Règne, Phylum, Classe, Ordre, Genre, Espèce, et Localisation (ex: "Quelle est la classe de Sarcoptes scabiei ?").
-2. Épidémiologie (ex: "Quels sont les facteurs favorisants de X ?").
-3. Signes cliniques (ex: "Quels sont les signes cliniques associés à Y ?").
-4. Diagnostic (ex: "Quelles méthodes permettent le diagnostic de Z ?").
-5. Traitement et Prévention.
-6. Cycle parasitaire / Cycle de vie.
-7. Pathologie / Pathogénie.
+RÈGLE D'OR (ANTI-HALLUCINATION) : 
+INTERDICTION ABSOLUE d'utiliser tes propres connaissances. Base-toi EXCLUSIVEMENT sur les images du cours manuscrit ou tapé fourni. Si une toxine, une famille ou un symptôme n'est pas sur le document, ne pose pas de question dessus.
 
-RÈGLES DE RÉDACTION :
-1. Propose toujours 4 ou 5 choix de réponses.
-2. Crée des pièges intelligents (ex: confondre l'Ordre et la Famille, ou un stade larvaire).
-3. La clé "bonnes_reponses" doit être une LISTE contenant le ou les textes EXACTS des choix corrects.
+THÉMATIQUES CIBLÉES :
+Génère des questions complexes en croisant ces informations (si présentes dans le document) : 
+1. L'étiologie (Famille, Gram, virus ARN/ADN, morphologie).
+2. Les toxines et facteurs de virulence (ex: Shigatoxine, PMT, capsule, fimbriae).
+3. La pathogénie, le cycle et les lésions (ex: atrophie des cornets, entérotyphlite, nécrose).
+4. L'épidémiologie (réservoirs, vecteurs, facteurs favorisants).
+5. Les signes cliniques précis par tranche d'âge ou espèce.
+6. Le diagnostic (PCR, ELISA, types de prélèvements).
+7. Les moyens de prévention et traitements (vaccins inactivés/atténués, antibiotiques, hygiène).
 
-RÈGLES INFORMATIQUES CRITIQUES :
-1. Réponds UNIQUEMENT via un objet JSON valide.
-2. N'utilise JAMAIS de guillemets doubles (") dans tes phrases. Remplace-les par des apostrophes (').
-3. Écris tout sur une seule ligne continue par champ.
+RÈGLES DE RÉDACTION DES QRM :
+1. Chaque question doit être difficile, croiser plusieurs informations et comporter 4 ou 5 choix de réponses.
+2. Crée des pièges de niveau universitaire (confusions de symptômes, confusions de souches bactériennes ou virales).
+3. Il peut y avoir UNE ou PLUSIEURS bonnes réponses.
+4. La clé "bonnes_reponses" doit être une LISTE contenant le(s) texte(s) EXACT(S) des choix corrects.
 
-FORMAT JSON REQUIS :
+FORMAT JSON REQUIS (Tout sur une seule ligne par champ, pas de doubles guillemets dans le texte) :
 {{
   "questions": [
     {{
       "type": "QRM",
-      "question": "Concernant Sarcoptes scabiei, quelles propositions sur son étiologie sont exactes ?",
-      "choix": ["Il appartient au phylum des Nematoda", "Il appartient à la classe des Arachnidia", "Il cause la gale sarcoptique", "Il se localise dans le caecum"],
-      "bonnes_reponses": ["Il appartient à la classe des Arachnidia", "Il cause la gale sarcoptique"],
-      "explication": ["Rappel du cours et justification technique..."],
-      "indice": "Piste de réflexion...",
+      "question": "Texte de la question...",
+      "choix": ["Choix A", "Choix B", "Choix C", "Choix D"],
+      "bonnes_reponses": ["Choix A", "Choix C"],
+      "explication": ["Explication stricte tirée du document..."],
+      "indice": "Indice...",
       "mnemotechnique": "Astuce..."
     }}
   ]
@@ -146,20 +145,17 @@ FORMAT JSON REQUIS :
 
 def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key):
     prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nb_qcm=nombre_qcm)
-    
     cle_propre = re.sub(r'[^a-zA-Z0-9_-]', '', api_key)
     url_base = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent".strip()
     
-    # <-- NOUVEAU : On injecte les images du PDF directement dans la requête
     parts = [{"text": prompt + "\nVoici les pages du cours à analyser :\n"}]
     parts.extend(images_pdf)
-    
     if texte_word:
         parts.append({"text": "\nNOTES SUPPLÉMENTAIRES :\n" + texte_word})
         
     payload = {
         "contents": [{"parts": parts}], 
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 8192}
+        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 8192}
     }
     
     rep = requests.post(url_base, params={"key": cle_propre}, json=payload)
@@ -174,15 +170,15 @@ def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est
 with st.sidebar:
     st.header("⚙️ Configuration")
     api_key = st.text_input("Clé API Gemini :", type="password")
-    matiere = st.selectbox("Matière :", ["Parasitologie / Pathologie", "Nutrition animale", "Biologie vétérinaire", "Gestion de clinique"])
-    difficulte = st.slider("Niveau de pièges :", 1, 10, 8)
+    matiere = st.selectbox("Matière :", ["Bactériologie / Virologie", "Parasitologie / Pathologie", "Gestion de clinique"])
+    difficulte = st.slider("Niveau de difficulté :", 1, 10, 9)
     nombre_qcm = st.number_input("Nombre de Questions :", 1, 30, 10)
     mode_examen = st.toggle("🚨 Mode Examen (Masquer les indices)")
 
-st.title("🐾 Simulateur d'Entraînement Vétérinaire (Choix Multiples)")
+st.title("🐾 Simulateur d'Entraînement Vétérinaire (Infectiologie)")
 
 c1, c2 = st.columns(2)
-with c1: f_pdf = st.file_uploader("1. PDF du cours", type=['pdf'])
+with c1: f_pdf = st.file_uploader("1. PDF du cours (Scans/Notes)", type=['pdf'])
 with c2: f_word = st.file_uploader("2. Notes Word (Opt.)", type=['docx'])
 
 if f_pdf:
@@ -191,7 +187,7 @@ if f_pdf:
     doc_t.close()
     
     with st.form("formulaire_generation"):
-        st.warning("⚠️ Astuce : Analyse des petits blocs de cours (3 à 6 pages maximum).")
+        st.warning("⚠️ Astuce : Analyse des blocs de 3 à 6 pages maximum pour garantir la précision des questions.")
         p_deb, p_fin = st.slider("Pages à analyser :", 1, p_tot, (1, min(5, p_tot)))
         bouton_generer = st.form_submit_button("🚀 Générer le Test", type="primary", use_container_width=True)
         
@@ -199,7 +195,7 @@ if f_pdf:
             if not api_key: 
                 st.error("Clé API manquante ! Renseigne-la dans la barre latérale.")
             else:
-                with st.spinner("Lecture de tes notes manuscrites et création des QRM..."):
+                with st.spinner(f"Génération stricte de {nombre_qcm} questions sur tes fiches d'infectiologie..."):
                     try:
                         images = extraire_images_pdf(f_pdf, p_deb, p_fin)
                         txt_w = lire_word(f_word) if f_word else ""
