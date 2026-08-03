@@ -145,8 +145,9 @@ def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est
     prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nb_qcm=nombre_qcm)
     cle_propre = re.sub(r'[^a-zA-Z0-9_-]', '', api_key)
     
-    # URL propre sur une seule ligne stricte
-    url_base = "[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent)"
+    # NETTOYAGE EXTRÊME : Destruction des caractères invisibles
+    url_brute = "[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent)"
+    url_base = url_brute.encode('ascii', 'ignore').decode('ascii').strip()
     
     parts = [{"text": prompt + "\nVoici les pages du cours à analyser :\n"}]
     parts.extend(images_pdf)
