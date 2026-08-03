@@ -75,36 +75,36 @@ def lire_word(buffer_fichier):
     return " ".join([para.text for para in doc.paragraphs])
 
 def sauvetage_json_coupe(texte_ia):
-    match = re.search(r'```(?:json)?(.*?)```', texte_ia, re.DOTALL)
-    if match:
-        texte_brut = match.group(1).strip()
-    else:
+    try:
+        # Nettoyage de sécurité au cas où l'IA mettrait quand même des balises
+        texte_propre = texte_ia.strip()
+        if texte_propre.startswith("```json"):
+            texte_propre = texte_propre[7:]
+        if texte_propre.startswith("```"):
+            texte_propre = texte_propre[3:]
+        if texte_propre.endswith("```"):
+            texte_propre = texte_propre[:-3]
+        
+        return json.loads(texte_propre.strip(), strict=False)
+    except json.JSONDecodeError:
+        # Ultime tentative de réparation
         debut = texte_ia.find('{')
         fin = texte_ia.rfind('}')
-        if debut == -1 or fin == -1:
-            raise Exception("L'IA n'a pas renvoyé de format lisible.")
-        texte_brut = texte_ia[debut:fin+1]
-
-    try:
-        return json.loads(texte_brut, strict=False)
-    except json.JSONDecodeError:
-        tentatives_fermeture = ['}', ']}', '"]}', '}]}', '"]}]}']
-        for t in tentatives_fermeture:
+        if debut != -1 and fin != -1:
             try:
-                donnees = json.loads(texte_brut + t, strict=False)
-                return donnees
+                return json.loads(texte_ia[debut:fin+1], strict=False)
             except:
                 pass
-        raise Exception("Le document a généré un code trop complexe.")
+        raise Exception("L'IA a généré un texte trop long ou corrompu. Baisse le nombre de questions (ex: 5).")
 
 # ==============================================================================
-# 3. Moteur IA (Spécialisé Infectiologie & Comptage Strict)
+# 3. Moteur IA (Spécialisé Infectiologie & JSON Forcé)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur de médecine vétérinaire, spécialisé EXCLUSIVEMENT en biologie infectieuse, virologie, bactériologie, parasitologie et pathologie.
 Matière : {matiere} | Difficulté : {difficulte}/10 (Niveau Concours très exigeant).
 
-MISSION ET COMPTAGE STRICT (CORRECTION DE BUG) :
+MISSION ET COMPTAGE STRICT :
 Tu dois générer EXACTEMENT ET STRICTEMENT {nb_qcm} questions à réponses multiples (QRM).
 Tu dois numéroter mentalement chaque question générée. Dès que tu atteins la question numéro {nb_qcm}, TU DOIS ARRÊTER LA GÉNÉRATION. Pas une de plus, pas une de moins.
 
@@ -146,7 +146,7 @@ FORMAT JSON REQUIS (Tout sur une seule ligne par champ, pas de doubles guillemet
 def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key):
     prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nb_qcm=nombre_qcm)
     cle_propre = re.sub(r'[^a-zA-Z0-9_-]', '', api_key)
-    url_base = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent".strip()
+    url_base = "[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent)".strip()
     
     parts = [{"text": prompt + "\nVoici les pages du cours à analyser :\n"}]
     parts.extend(images_pdf)
@@ -155,7 +155,11 @@ def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est
         
     payload = {
         "contents": [{"parts": parts}], 
-        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 8192}
+        "generationConfig": {
+            "temperature": 0.1, 
+            "maxOutputTokens": 8192,
+            "responseMimeType": "application/json"
+        }
     }
     
     rep = requests.post(url_base, params={"key": cle_propre}, json=payload)
@@ -187,7 +191,7 @@ if f_pdf:
     doc_t.close()
     
     with st.form("formulaire_generation"):
-        st.warning("⚠️ Astuce : Analyse des blocs de 3 à 6 pages maximum pour garantir la précision des questions.")
+        st.warning("⚠️ Astuce : Analyse des blocs de 3 à 6 pages maximum pour éviter que l'IA ne coupe sa réponse en plein milieu.")
         p_deb, p_fin = st.slider("Pages à analyser :", 1, p_tot, (1, min(5, p_tot)))
         bouton_generer = st.form_submit_button("🚀 Générer le Test", type="primary", use_container_width=True)
         
