@@ -77,21 +77,20 @@ def lire_word(buffer_fichier):
 def sauvetage_json_coupe(texte_ia):
     try:
         texte_propre = texte_ia.strip()
-        # On nettoie les balises markdown si l'IA s'obstine à en mettre
-        if texte_propre.startswith("```json"):
-            texte_propre = texte_propre[7:]
-        if texte_propre.startswith("```"):
-            texte_propre = texte_propre[3:]
-        if texte_propre.endswith("```"):
-            texte_propre = texte_propre[:-3]
+        # Suppression drastique des balises parasites
+        if texte_propre.startswith("```json"): texte_propre = texte_propre[7:]
+        if texte_propre.startswith("```"): texte_propre = texte_propre[3:]
+        if texte_propre.endswith("```"): texte_propre = texte_propre[:-3]
+        
+        # Nettoyage des sauts de ligne intempestifs qui brisent le JSON
+        texte_propre = texte_propre.replace('\n', ' ')
         
         return json.loads(texte_propre.strip(), strict=False)
     except json.JSONDecodeError as e:
-        # En cas d'échec, on affiche l'erreur exacte et le début de la réponse de l'IA pour comprendre
         raise Exception(f"L'IA a mal formaté sa réponse (Erreur JSON). Voici ce qu'elle a essayé de dire :\n\n{texte_ia[:300]}...")
 
 # ==============================================================================
-# 3. Moteur IA (Spécialisé Infectiologie & JSON Réparé)
+# 3. Moteur IA (Spécialisé Infectiologie & JSON Forcé par Schema)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur de médecine vétérinaire, spécialisé EXCLUSIVEMENT en biologie infectieuse, virologie, bactériologie, parasitologie et pathologie.
@@ -99,7 +98,7 @@ Matière : {matiere} | Difficulté : {difficulte}/10 (Niveau Concours très exig
 
 MISSION ET COMPTAGE STRICT :
 Tu dois générer EXACTEMENT ET STRICTEMENT {nb_qcm} questions à réponses multiples (QRM).
-Tu dois numéroter mentalement chaque question générée. Dès que tu atteins la question numéro {nb_qcm}, TU DOIS ARRÊTER LA GÉNÉRATION.
+Tu dois numéroter mentalement chaque question générée. Dès que tu atteins la question numéro {nb_qcm}, TU DOIS ARRÊTER LA GÉNÉRATION. Pas une de plus, pas une de moins.
 
 RÈGLE D'OR (ANTI-HALLUCINATION) : 
 INTERDICTION ABSOLUE d'utiliser tes propres connaissances. Base-toi EXCLUSIVEMENT sur les images du cours manuscrit ou tapé fourni. Si une toxine, une famille ou un symptôme n'est pas sur le document, ne pose pas de question dessus.
@@ -108,39 +107,22 @@ THÉMATIQUES CIBLÉES :
 Génère des questions complexes en croisant ces informations (si présentes dans le document) : 
 1. L'étiologie (Famille, Gram, virus ARN/ADN, morphologie).
 2. Les toxines et facteurs de virulence (ex: Shigatoxine, PMT, capsule, fimbriae).
-3. La pathogénie, le cycle et les lésions.
+3. La pathogénie, le cycle et les lésions (ex: atrophie des cornets, entérotyphlite, nécrose).
 4. L'épidémiologie (réservoirs, vecteurs, facteurs favorisants).
-5. Les signes cliniques précis.
+5. Les signes cliniques précis par tranche d'âge ou espèce.
 6. Le diagnostic (PCR, ELISA, types de prélèvements).
-7. Les moyens de prévention et traitements.
+7. Les moyens de prévention et traitements (vaccins inactivés/atténués, antibiotiques, hygiène).
 
-RÈGLES INFORMATIQUES VITALES POUR LE JSON :
-1. Tu dois OBLIGATOIREMENT utiliser des guillemets doubles (") pour encadrer toutes les clés et les valeurs de ton objet JSON. N'utilise jamais de guillemets simples (') pour la structure.
-2. Si tu dois mettre une apostrophe ou une citation à l'intérieur du texte de la question, utilise un guillemet simple (').
+RÈGLES DE RÉDACTION DES QRM :
+1. Chaque question doit être difficile, croiser plusieurs informations et comporter 4 ou 5 choix de réponses.
+2. Crée des pièges de niveau universitaire (confusions de symptômes, confusions de souches bactériennes ou virales).
 3. Il peut y avoir UNE ou PLUSIEURS bonnes réponses.
-4. La clé "bonnes_reponses" doit être une LISTE contenant le(s) texte(s) EXACT(S) des choix corrects.
-
-FORMAT JSON REQUIS :
-{{
-  "questions": [
-    {{
-      "type": "QRM",
-      "question": "Texte de la question...",
-      "choix": ["Choix A", "Choix B", "Choix C", "Choix D"],
-      "bonnes_reponses": ["Choix A", "Choix C"],
-      "explication": ["Explication stricte tirée du document..."],
-      "indice": "Indice...",
-      "mnemotechnique": "Astuce..."
-    }}
-  ]
-}}
 """
 
 def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key):
     prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nb_qcm=nombre_qcm)
     cle_propre = re.sub(r'[^a-zA-Z0-9_-]', '', api_key)
     
-    # URL cryptée en Base64 pour éviter tout bug d'espace invisible
     url_b64 = "aHR0cHM6Ly9nZW5lcmF0aXZlbGFuZ3VhZ2UuZ29vZ2xlYXBpcy5jb20vdjFiZXRhL21vZGVscy9nZW1pbmktMi41LWZsYXNoOmdlbmVyYXRlQ29udGVudA=="
     url_base = base64.b64decode(url_b64).decode("utf-8")
     
@@ -154,7 +136,30 @@ def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est
         "generationConfig": {
             "temperature": 0.1, 
             "maxOutputTokens": 8192,
-            "responseMimeType": "application/json"
+            "responseMimeType": "application/json",
+            # LE MOULE STRICT : L'IA est obligée de respecter cette structure à la lettre
+            "responseSchema": {
+                "type": "OBJECT",
+                "properties": {
+                    "questions": {
+                        "type": "ARRAY",
+                        "items": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "type": {"type": "STRING"},
+                                "question": {"type": "STRING"},
+                                "choix": {"type": "ARRAY", "items": {"type": "STRING"}},
+                                "bonnes_reponses": {"type": "ARRAY", "items": {"type": "STRING"}},
+                                "explication": {"type": "ARRAY", "items": {"type": "STRING"}},
+                                "indice": {"type": "STRING"},
+                                "mnemotechnique": {"type": "STRING"}
+                            },
+                            "required": ["type", "question", "choix", "bonnes_reponses", "explication", "indice", "mnemotechnique"]
+                        }
+                    }
+                },
+                "required": ["questions"]
+            }
         }
     }
     
