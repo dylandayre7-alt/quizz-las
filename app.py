@@ -77,12 +77,10 @@ def lire_word(buffer_fichier):
 def sauvetage_json_coupe(texte_ia):
     try:
         texte_propre = texte_ia.strip()
-        # Suppression drastique des balises parasites
         if texte_propre.startswith("```json"): texte_propre = texte_propre[7:]
         if texte_propre.startswith("```"): texte_propre = texte_propre[3:]
         if texte_propre.endswith("```"): texte_propre = texte_propre[:-3]
         
-        # Nettoyage des sauts de ligne intempestifs qui brisent le JSON
         texte_propre = texte_propre.replace('\n', ' ')
         
         return json.loads(texte_propre.strip(), strict=False)
@@ -90,15 +88,15 @@ def sauvetage_json_coupe(texte_ia):
         raise Exception(f"L'IA a mal formaté sa réponse (Erreur JSON). Voici ce qu'elle a essayé de dire :\n\n{texte_ia[:300]}...")
 
 # ==============================================================================
-# 3. Moteur IA (Spécialisé Infectiologie & JSON Forcé par Schema)
+# 3. Moteur IA (Consignes réparées pour éviter les coupures)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur de médecine vétérinaire, spécialisé EXCLUSIVEMENT en biologie infectieuse, virologie, bactériologie, parasitologie et pathologie.
 Matière : {matiere} | Difficulté : {difficulte}/10 (Niveau Concours très exigeant).
 
-MISSION ET COMPTAGE STRICT :
-Tu dois générer EXACTEMENT ET STRICTEMENT {nb_qcm} questions à réponses multiples (QRM).
-Tu dois numéroter mentalement chaque question générée. Dès que tu atteins la question numéro {nb_qcm}, TU DOIS ARRÊTER LA GÉNÉRATION. Pas une de plus, pas une de moins.
+MISSION :
+Tu dois générer EXACTEMENT {nb_qcm} questions à réponses multiples (QRM).
+IMPORTANT : Prends le temps de terminer toutes tes phrases et de bien fermer complètement la structure JSON à la fin. Ne coupe jamais ton texte brutalement.
 
 RÈGLE D'OR (ANTI-HALLUCINATION) : 
 INTERDICTION ABSOLUE d'utiliser tes propres connaissances. Base-toi EXCLUSIVEMENT sur les images du cours manuscrit ou tapé fourni. Si une toxine, une famille ou un symptôme n'est pas sur le document, ne pose pas de question dessus.
@@ -137,7 +135,6 @@ def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est
             "temperature": 0.1, 
             "maxOutputTokens": 8192,
             "responseMimeType": "application/json",
-            # LE MOULE STRICT : L'IA est obligée de respecter cette structure à la lettre
             "responseSchema": {
                 "type": "OBJECT",
                 "properties": {
@@ -203,7 +200,7 @@ if f_pdf:
             if not api_key: 
                 st.error("Clé API manquante ! Renseigne-la dans la barre latérale.")
             else:
-                with st.spinner(f"Génération stricte de {nombre_qcm} questions sur tes fiches d'infectiologie..."):
+                with st.spinner(f"Génération de {nombre_qcm} questions sur tes fiches d'infectiologie..."):
                     try:
                         images = extraire_images_pdf(f_pdf, p_deb, p_fin)
                         txt_w = lire_word(f_word) if f_word else ""
