@@ -88,15 +88,15 @@ def sauvetage_json_coupe(texte_ia):
         raise Exception(f"L'IA a mal formaté sa réponse (Erreur JSON). Voici ce qu'elle a essayé de dire :\n\n{texte_ia[:300]}...")
 
 # ==============================================================================
-# 3. Moteur IA (Format Examen Vétérinaire Officiel)
+# 3. Moteur IA (Format Examen Vétérinaire - ANTI-COUPURE)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur de médecine vétérinaire, spécialisé EXCLUSIVEMENT en pathologie et biologie infectieuse.
 Matière : {matiere} | Difficulté : {difficulte}/10 (Niveau Concours très exigeant).
 
 MISSION :
-Tu dois générer EXACTEMENT {nb_qcm} questions à réponses multiples (QRM).
-IMPORTANT : Prends le temps de terminer toutes tes phrases et de bien fermer complètement la structure JSON à la fin. Ne coupe jamais ton texte.
+Génère un tableau JSON contenant EXACTEMENT {nb_qcm} questions (QRM). 
+ATTENTION VITALE : Ton objectif prioritaire est de générer un fichier JSON 100% complet et valide. Ne coupe jamais ton texte, finis toutes tes phrases, et assure-toi que le JSON se termine bien par les accolades de fermeture.
 
 RÈGLE D'OR (ANTI-HALLUCINATION) : 
 INTERDICTION ABSOLUE d'utiliser tes propres connaissances. Base-toi EXCLUSIVEMENT sur les images du cours manuscrit ou tapé fourni. Si une toxine ou un symptôme n'est pas sur le document, ne pose pas de question dessus.
