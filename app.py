@@ -96,7 +96,7 @@ def sauvetage_json_coupe(texte_ia):
         raise Exception("L'IA a généré un texte trop long ou corrompu. Baisse le nombre de questions (ex: 5).")
 
 # ==============================================================================
-# 3. Moteur IA (Spécialisé Infectiologie & JSON Forcé & Anti-Proxy)
+# 3. Moteur IA (Spécialisé Infectiologie & JSON Forcé & URL Cryptée)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur de médecine vétérinaire, spécialisé EXCLUSIVEMENT en biologie infectieuse, virologie, bactériologie, parasitologie et pathologie.
@@ -145,10 +145,10 @@ def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est
     prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nb_qcm=nombre_qcm)
     cle_propre = re.sub(r'[^a-zA-Z0-9_-]', '', api_key)
     
-    # FIX : Forcer Gemini 2.5 Flash avec séparation propre pour éviter les sauts de ligne cachés
-    domaine = "[https://generativelanguage.googleapis.com](https://generativelanguage.googleapis.com)"
-    endpoint = "/v1beta/models/gemini-2.5-flash:generateContent"
-    url_base = f"{domaine}{endpoint}"
+    # ☢️ L'ARME NUCLÉAIRE : URL encodée en Base64. Zéro risque de caractère fantôme.
+    # Cette chaîne décryptée donne exactement : [https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent)
+    url_b64 = "aHR0cHM6Ly9nZW5lcmF0aXZlbGFuZ3VhZ2UuZ29vZ2xlYXBpcy5jb20vdjFiZXRhL21vZGVscy9nZW1pbmktMi41LWZsYXNoOmdlbmVyYXRlQ29udGVudA=="
+    url_base = base64.b64decode(url_b64).decode("utf-8")
     
     parts = [{"text": prompt + "\nVoici les pages du cours à analyser :\n"}]
     parts.extend(images_pdf)
@@ -164,7 +164,7 @@ def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est
         }
     }
     
-    # FIX RESEAU : On force la requête à ignorer les proxys système
+    # Sécurisation de la connexion réseau
     session = requests.Session()
     session.trust_env = False
     
