@@ -1,6 +1,5 @@
 import streamlit as st
 import fitz  # PyMuPDF
-import json
 import pandas as pd
 import docx
 from datetime import datetime
@@ -28,7 +27,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Utilitaires & Bouclier de Sauvetage Amélioré
+# 2. Utilitaires & Bouclier INCASSABLE (Fin du JSON)
 # ==============================================================================
 if 'cahier_memoire' not in st.session_state:
     st.session_state['cahier_memoire'] = {}
@@ -74,39 +73,82 @@ def lire_word(buffer_fichier):
     doc = docx.Document(buffer_fichier)
     return " ".join([para.text for para in doc.paragraphs])
 
-def sauvetage_json_coupe(texte_ia):
-    try:
-        texte_propre = texte_ia.strip()
-        if texte_propre.startswith("```json"): texte_propre = texte_propre[7:]
-        if texte_propre.startswith("```"): texte_propre = texte_propre[3:]
-        if texte_propre.endswith("```"): texte_propre = texte_propre[:-3]
+# NOUVEAU PARSER BLINDÉ CONTRE LES COUPURES
+def parser_texte_incassable(texte_ia):
+    questions = []
+    # On découpe le texte brut à chaque balise @QUESTION
+    blocs = texte_ia.split('@QUESTION')
+    
+    for bloc in blocs[1:]: # On ignore le blabla du début
+        try:
+            q_dict = {'type': 'QRM', 'indice': 'Aucun indice.', 'mnemotechnique': 'Aucune astuce.'}
+            
+            # Découpage chirurgical par balise
+            q_part = bloc.split('@CHOIX')[0].strip()
+            c_part = bloc.split('@CHOIX')[1].split('@REPONSES')[0].strip()
+            r_part = bloc.split('@REPONSES')[1].split('@EXPLICATION')[0].strip()
+            e_part = bloc.split('@EXPLICATION')[1].strip()
+            
+            q_dict['question'] = q_part
+            
+            # Nettoyage des tirets pour les listes
+            choix_lignes = c_part.split('\n')
+            q_dict['choix'] = [re.sub(r'^[-*]\s*', '', ligne).strip() for ligne in choix_lignes if ligne.strip()]
+            
+            rep_lignes = r_part.split('\n')
+            q_dict['bonnes_reponses'] = [re.sub(r'^[-*]\s*', '', ligne).strip() for ligne in rep_lignes if ligne.strip()]
+            
+            q_dict['explication'] = [e_part]
+            
+            # On ajoute la question seulement si elle est bien complète
+            if q_dict['question'] and len(q_dict['choix']) >= 2 and len(q_dict['bonnes_reponses']) >= 1:
+                questions.append(q_dict)
+                
+        except Exception:
+            # SI L'IA COUPE LE TEXTE ICI, ON L'IGNORE SANS FAIRE PLANTER L'APPLICATION
+            continue 
+            
+    if len(questions) == 0:
+        raise Exception("L'IA n'a pas pu lire le document. Vérifie la qualité de l'image ou du PDF.")
         
-        texte_propre = texte_propre.replace('\n', ' ')
-        
-        return json.loads(texte_propre.strip(), strict=False)
-    except json.JSONDecodeError as e:
-        raise Exception(f"L'IA a mal formaté sa réponse (Erreur JSON). Voici ce qu'elle a essayé de dire :\n\n{texte_ia[:300]}...")
+    return {"questions": questions}
 
 # ==============================================================================
-# 3. Moteur IA (Format Examen Vétérinaire - ANTI-COUPURE)
+# 3. Moteur IA (Format Texte Brut - Plus aucun JSON)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur de médecine vétérinaire, spécialisé EXCLUSIVEMENT en pathologie et biologie infectieuse.
 Matière : {matiere} | Difficulté : {difficulte}/10 (Niveau Concours très exigeant).
 
 MISSION :
-Génère un tableau JSON contenant EXACTEMENT {nb_qcm} questions (QRM). 
-ATTENTION VITALE : Ton objectif prioritaire est de générer un fichier JSON 100% complet et valide. Ne coupe jamais ton texte, finis toutes tes phrases, et assure-toi que le JSON se termine bien par les accolades de fermeture.
+Tu dois générer {nb_qcm} questions à réponses multiples (QRM).
 
 RÈGLE D'OR (ANTI-HALLUCINATION) : 
-INTERDICTION ABSOLUE d'utiliser tes propres connaissances. Base-toi EXCLUSIVEMENT sur les images du cours manuscrit ou tapé fourni. Si une toxine ou un symptôme n'est pas sur le document, ne pose pas de question dessus.
+INTERDICTION ABSOLUE d'utiliser tes propres connaissances. Base-toi EXCLUSIVEMENT sur les images du cours manuscrit ou tapé fourni. Si une information n'est pas sur le document, ne pose pas de question dessus.
 
 STYLE DE QUESTION (CALQUÉ SUR LES EXAMENS VÉTÉRINAIRES OFFICIELS) :
-Tes questions doivent avoir EXACTEMENT la même structure et la même complexité que les vrais examens :
-1. L'AMORCE : Une phrase introductive directe (ex: "Le pathogène X est responsable de...") OU une mise en situation clinique (ex: "Une exploitation vous consulte pour... Parmi les étiologies :").
-2. LES CHOIX : EXACTEMENT 5 propositions de réponses par question (jamais 4, jamais 6).
-3. LA DENSITÉ : Les propositions doivent être des phrases longues, détaillées et techniques (mélangeant stades de développement, signes cliniques, diagnostic, étiologie ou prévention).
-4. LES PIÈGES : Crée des pièges subtils dans ces longues phrases. Il peut y avoir UNE ou PLUSIEURS bonnes réponses.
+1. L'AMORCE : Une phrase introductive directe ou une mise en situation clinique complexe.
+2. LES CHOIX : EXACTEMENT 5 propositions de réponses par question.
+3. LA DENSITÉ : Des phrases longues, détaillées et très techniques.
+4. LES PIÈGES : Il peut y avoir UNE ou PLUSIEURS bonnes réponses exactes.
+
+RÈGLE INFORMATIQUE ABSOLUE (FORMAT TEXTE STRICT) :
+TU NE DOIS JAMAIS UTILISER LE FORMAT JSON.
+Tu dois formater CHAQUE question EXACTEMENT comme le modèle ci-dessous. N'utilise pas d'accolades. Utilise uniquement ces balises avec l'arobase.
+
+@QUESTION
+[Écris ici l'amorce ou la situation clinique]
+@CHOIX
+- [Choix 1]
+- [Choix 2]
+- [Choix 3]
+- [Choix 4]
+- [Choix 5]
+@REPONSES
+- [Copie ici le texte exact du choix correct]
+- [Copie ici le texte exact d'un autre choix correct s'il y en a un]
+@EXPLICATION
+[Explication détaillée issue du cours]
 """
 
 def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key):
@@ -125,30 +167,8 @@ def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est
         "contents": [{"parts": parts}], 
         "generationConfig": {
             "temperature": 0.1, 
-            "maxOutputTokens": 8192,
-            "responseMimeType": "application/json",
-            "responseSchema": {
-                "type": "OBJECT",
-                "properties": {
-                    "questions": {
-                        "type": "ARRAY",
-                        "items": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "type": {"type": "STRING"},
-                                "question": {"type": "STRING"},
-                                "choix": {"type": "ARRAY", "items": {"type": "STRING"}},
-                                "bonnes_reponses": {"type": "ARRAY", "items": {"type": "STRING"}},
-                                "explication": {"type": "ARRAY", "items": {"type": "STRING"}},
-                                "indice": {"type": "STRING"},
-                                "mnemotechnique": {"type": "STRING"}
-                            },
-                            "required": ["type", "question", "choix", "bonnes_reponses", "explication", "indice", "mnemotechnique"]
-                        }
-                    }
-                },
-                "required": ["questions"]
-            }
+            "maxOutputTokens": 8192
+            # Fin du mode JSON forcé. L'IA a la liberté d'écrire en texte brut.
         }
     }
     
@@ -159,7 +179,7 @@ def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est
     if rep.status_code != 200: raise Exception(f"Erreur API ({rep.status_code}) : {rep.text}")
     
     texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text']
-    return sauvetage_json_coupe(texte_ia)
+    return parser_texte_incassable(texte_ia)
 
 # ==============================================================================
 # 4. Interface Graphique
@@ -184,7 +204,7 @@ if f_pdf:
     doc_t.close()
     
     with st.form("formulaire_generation"):
-        st.warning("⚠️ Astuce : Analyse des blocs de 3 à 6 pages maximum pour éviter que l'IA ne coupe sa réponse en plein milieu.")
+        st.warning("⚠️ Astuce : Analyse des blocs de 3 à 6 pages maximum. Le système est désormais immunisé contre les coupures.")
         p_deb, p_fin = st.slider("Pages à analyser :", 1, p_tot, (1, min(5, p_tot)))
         bouton_generer = st.form_submit_button("🚀 Générer le Test", type="primary", use_container_width=True)
         
@@ -192,7 +212,7 @@ if f_pdf:
             if not api_key: 
                 st.error("Clé API manquante ! Renseigne-la dans la barre latérale.")
             else:
-                with st.spinner(f"Génération de {nombre_qcm} questions sur tes fiches d'infectiologie..."):
+                with st.spinner(f"Génération de tes questions sur fiches d'infectiologie (Anti-Crash Activé)..."):
                     try:
                         images = extraire_images_pdf(f_pdf, p_deb, p_fin)
                         txt_w = lire_word(f_word) if f_word else ""
