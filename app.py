@@ -88,33 +88,25 @@ def sauvetage_json_coupe(texte_ia):
         raise Exception(f"L'IA a mal formaté sa réponse (Erreur JSON). Voici ce qu'elle a essayé de dire :\n\n{texte_ia[:300]}...")
 
 # ==============================================================================
-# 3. Moteur IA (Consignes réparées pour éviter les coupures)
+# 3. Moteur IA (Format Examen Vétérinaire Officiel)
 # ==============================================================================
 SYSTEM_PROMPT = """
-Tu es un Professeur de médecine vétérinaire, spécialisé EXCLUSIVEMENT en biologie infectieuse, virologie, bactériologie, parasitologie et pathologie.
+Tu es un Professeur de médecine vétérinaire, spécialisé EXCLUSIVEMENT en pathologie et biologie infectieuse.
 Matière : {matiere} | Difficulté : {difficulte}/10 (Niveau Concours très exigeant).
 
 MISSION :
 Tu dois générer EXACTEMENT {nb_qcm} questions à réponses multiples (QRM).
-IMPORTANT : Prends le temps de terminer toutes tes phrases et de bien fermer complètement la structure JSON à la fin. Ne coupe jamais ton texte brutalement.
+IMPORTANT : Prends le temps de terminer toutes tes phrases et de bien fermer complètement la structure JSON à la fin. Ne coupe jamais ton texte.
 
 RÈGLE D'OR (ANTI-HALLUCINATION) : 
-INTERDICTION ABSOLUE d'utiliser tes propres connaissances. Base-toi EXCLUSIVEMENT sur les images du cours manuscrit ou tapé fourni. Si une toxine, une famille ou un symptôme n'est pas sur le document, ne pose pas de question dessus.
+INTERDICTION ABSOLUE d'utiliser tes propres connaissances. Base-toi EXCLUSIVEMENT sur les images du cours manuscrit ou tapé fourni. Si une toxine ou un symptôme n'est pas sur le document, ne pose pas de question dessus.
 
-THÉMATIQUES CIBLÉES :
-Génère des questions complexes en croisant ces informations (si présentes dans le document) : 
-1. L'étiologie (Famille, Gram, virus ARN/ADN, morphologie).
-2. Les toxines et facteurs de virulence (ex: Shigatoxine, PMT, capsule, fimbriae).
-3. La pathogénie, le cycle et les lésions (ex: atrophie des cornets, entérotyphlite, nécrose).
-4. L'épidémiologie (réservoirs, vecteurs, facteurs favorisants).
-5. Les signes cliniques précis par tranche d'âge ou espèce.
-6. Le diagnostic (PCR, ELISA, types de prélèvements).
-7. Les moyens de prévention et traitements (vaccins inactivés/atténués, antibiotiques, hygiène).
-
-RÈGLES DE RÉDACTION DES QRM :
-1. Chaque question doit être difficile, croiser plusieurs informations et comporter 4 ou 5 choix de réponses.
-2. Crée des pièges de niveau universitaire (confusions de symptômes, confusions de souches bactériennes ou virales).
-3. Il peut y avoir UNE ou PLUSIEURS bonnes réponses.
+STYLE DE QUESTION (CALQUÉ SUR LES EXAMENS VÉTÉRINAIRES OFFICIELS) :
+Tes questions doivent avoir EXACTEMENT la même structure et la même complexité que les vrais examens :
+1. L'AMORCE : Une phrase introductive directe (ex: "Le pathogène X est responsable de...") OU une mise en situation clinique (ex: "Une exploitation vous consulte pour... Parmi les étiologies :").
+2. LES CHOIX : EXACTEMENT 5 propositions de réponses par question (jamais 4, jamais 6).
+3. LA DENSITÉ : Les propositions doivent être des phrases longues, détaillées et techniques (mélangeant stades de développement, signes cliniques, diagnostic, étiologie ou prévention).
+4. LES PIÈGES : Crée des pièges subtils dans ces longues phrases. Il peut y avoir UNE ou PLUSIEURS bonnes réponses.
 """
 
 def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key):
