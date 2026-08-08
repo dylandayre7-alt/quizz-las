@@ -126,7 +126,7 @@ def parser_texte_naturel(texte_ia):
                 "choix": choix_list,
                 "bonnes_reponses": bonnes_reponses_list,
                 "explication": [exp if exp else "Explication non générée (texte coupé)."],
-                "indice": "Relis attentivement les détails cliniques de chaque proposition.",
+                "indice": "Relis attentivement les détails cliniques ou biologiques de chaque proposition.",
                 "mnemotechnique": "Concentre-toi sur les mots-clés majeurs du cours."
             })
             
@@ -139,7 +139,7 @@ def parser_texte_naturel(texte_ia):
     return {"questions": questions}
 
 # ==============================================================================
-# 3. Moteur IA (Format Examen Vétérinaire Officiel)
+# 3. Moteur IA (Format Examen Vétérinaire Réparti 50/50)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur de médecine vétérinaire, spécialisé EXCLUSIVEMENT en pathologie et biologie infectieuse.
@@ -148,12 +148,19 @@ Matière : {matiere} | Difficulté : {difficulte}/10 (Niveau Concours très exig
 MISSION :
 Tu dois générer {nb_qcm} questions à réponses multiples (QRM). 
 
-RÉFÉRENCE DE STYLE OBLIGATOIRE :
-Conforme tes questions EXACTEMENT à l'exigence et au style de l'archive "exemples QCM MIP-AP_parasito.docx".
-1. L'AMORCE : Une phrase introductive directe ou une mise en situation clinique très détaillée.
-2. LES CHOIX : EXACTEMENT 5 propositions de réponses par question. Des phrases très longues, denses et techniques.
-3. LES PIÈGES : Il peut y avoir UNE ou PLUSIEURS bonnes réponses.
-Base-toi EXCLUSIVEMENT sur les images du cours manuscrit ou tapé fourni.
+RÈGLE D'OR (ANTI-HALLUCINATION) : 
+INTERDICTION ABSOLUE d'utiliser tes propres connaissances. Base-toi EXCLUSIVEMENT sur les images du cours manuscrit ou tapé fourni. Si une information n'est pas sur le document, ne pose pas de question dessus.
+
+RÉPARTITION DES QUESTIONS (50/50 OBLIGATOIRE) :
+Tu dois générer environ 50% de questions de TYPE 1 et 50% de questions de TYPE 2. Il y a toujours 5 choix longs et denses par question, et une ou plusieurs bonnes réponses.
+
+TYPE 1 : CAS CLINIQUE DE DÉDUCTION (SANS DIAGNOSTIC)
+- L'AMORCE : Décris une situation clinique détaillée (espèce, symptômes, âge, contexte) MAIS NE DONNE SURTOUT PAS LE NOM DE LA MALADIE OU DU PATHOGÈNE.
+- LES CHOIX : Les 5 propositions doivent être des déductions diagnostiques, des théories (ex: "Vous suspectez X car..."), des choix d'examens complémentaires et ce qu'ils révéleraient, ou des propositions thérapeutiques logiques.
+
+TYPE 2 : PATHOLOGIE/BIOLOGIE (AVEC DIAGNOSTIC CONNU)
+- L'AMORCE : Donne directement le diagnostic ou le nom du pathogène (ex: "Concernant l'ascaridiose porcine due à Ascaris suum...").
+- LES CHOIX : Les 5 propositions doivent être des phrases très longues, denses et techniques sur la biologie, l'épidémiologie, le cycle, ou les caractéristiques de l'agent.
 
 RÈGLE INFORMATIQUE ABSOLUE (BALISES STRICTES) :
 Tu ne dois produire AUCUN texte avant ou après (ni introduction, ni politesse). 
@@ -161,7 +168,7 @@ Tu dois STRICTEMENT utiliser ces balises pour structurer CHAQUE question, c'est 
 
 @DEBUT_QUESTION
 @AMORCE
-[Ton texte d'introduction de la question]
+[Ton texte d'introduction de la question (Type 1 ou Type 2)]
 @CHOIX_1
 [Texte détaillé du premier choix]
 @CHOIX_2
@@ -194,7 +201,7 @@ def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est
     payload = {
         "contents": [{"parts": parts}], 
         "generationConfig": {
-            "temperature": 0.2, 
+            "temperature": 0.3, # Légèrement augmenté pour favoriser la diversité des deux types de questions
             "maxOutputTokens": 8192
         },
         "safetySettings": [
@@ -249,7 +256,7 @@ if f_pdf:
             if not api_key: 
                 st.error("Clé API manquante ! Renseigne-la dans la barre latérale.")
             else:
-                with st.spinner(f"Génération de {nombre_qcm} questions complexes avec le format d'examen officiel..."):
+                with st.spinner(f"Génération de {nombre_qcm} questions (Mélange Cas Cliniques / Théorie)..."):
                     try:
                         images = extraire_images_pdf(f_pdf, p_deb, p_fin)
                         txt_w = lire_word(f_word) if f_word else ""
