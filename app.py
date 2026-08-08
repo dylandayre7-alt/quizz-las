@@ -27,7 +27,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Utilitaires & Bouclier INCASSABLE (Regex Dynamique)
+# 2. Utilitaires & Bouclier INCASSABLE (Balises de Titane)
 # ==============================================================================
 if 'cahier_memoire' not in st.session_state:
     st.session_state['cahier_memoire'] = {}
@@ -66,49 +66,75 @@ def lire_word(buffer_fichier):
     doc = docx.Document(buffer_fichier)
     return " ".join([para.text for para in doc.paragraphs])
 
-# NOUVEAU PARSER BLINDÉ AVEC RECHERCHE INTELLIGENTE (REGEX)
+# LE PARSER ULTIME : Immunisé contre les absences de retours à la ligne et les coupures
 def parser_texte_naturel(texte_ia):
     questions = []
-    
-    # On découpe à chaque fois qu'on voit le mot QUESTION (avec ou sans numéro)
-    blocs = re.split(r'(?i)QUESTION\s*\d*\s*:', texte_ia)
+    # On isole chaque question avec la balise de départ
+    blocs = re.split(r'(?i)@DEBUT_QUESTION', texte_ia)
     
     for bloc in blocs[1:]:
         if not bloc.strip(): continue
-        
         try:
-            # Recherche intelligente des mots-clés peu importe comment l'IA les écrit
-            m_choix = re.search(r'(?i)(?:CHOIX|PROPOSITIONS)\s*:', bloc)
-            m_rep = re.search(r'(?i)(?:BONNES?_?\s*R[EÉ]PONSES?|R[EÉ]PONSES?\s*CORRECTES?|R[EÉ]PONSES?)\s*:', bloc)
-            m_exp = re.search(r'(?i)(?:EXPLICATIONS?|JUSTIFICATIONS?)\s*:', bloc)
+            # Fonctions chirurgicales pour extraire le texte exact entre deux balises
+            def extract_between(start_tag, end_tag, text):
+                pattern = rf"{start_tag}\s*:?\s*(.*?){end_tag}"
+                match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+                return match.group(1).strip() if match else ""
+                
+            def extract_after(start_tag, text):
+                pattern = rf"{start_tag}\s*:?\s*(.*)"
+                match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+                return match.group(1).strip() if match else ""
+
+            def clean_choice(text):
+                # Supprime les "1.", "A)", "-" que l'IA pourrait rajouter au début
+                return re.sub(r'^[-*•\d\.\)]+\s*', '', text).strip()
+
+            amorce = extract_between("@AMORCE", "@CHOIX_1", bloc)
+            c1 = clean_choice(extract_between("@CHOIX_1", "@CHOIX_2", bloc))
+            c2 = clean_choice(extract_between("@CHOIX_2", "@CHOIX_3", bloc))
+            c3 = clean_choice(extract_between("@CHOIX_3", "@CHOIX_4", bloc))
+            c4 = clean_choice(extract_between("@CHOIX_4", "@CHOIX_5", bloc))
+            c5 = clean_choice(extract_between("@CHOIX_5", "@REPONSES_CORRECTES", bloc))
             
-            if not (m_choix and m_rep and m_exp):
-                continue # Il manque une section vitale, on l'ignore sans crasher
+            rep_text = extract_between("@REPONSES_CORRECTES", "@EXPLICATION", bloc)
             
-            q_part = bloc[:m_choix.start()].strip()
-            c_part = bloc[m_choix.end():m_rep.start()].strip()
-            r_part = bloc[m_rep.end():m_exp.start()].strip()
-            e_part = bloc[m_exp.end():].strip()
+            # Gestion de la coupure de texte en pleine explication
+            if "@FIN_QUESTION" in bloc.upper():
+                exp = extract_between("@EXPLICATION", "@FIN_QUESTION", bloc)
+            else:
+                exp = extract_after("@EXPLICATION", bloc)
+                
+            # S'il manque un des choix à cause d'une coupure majeure, on ignore juste cette question
+            if not amorce or not c1 or not c5 or not rep_text:
+                continue 
+                
+            choix_list = [c1, c2, c3, c4, c5]
+            bonnes_reponses_list = []
             
-            # Nettoyage profond (retire les puces -, *, 1., A), etc. devant les phrases)
-            choix_lignes = [re.sub(r'^[-*•]\s*|^\d+[\.\)]\s*|^[A-Ea-e][\.\)]\s*', '', c).strip() for c in c_part.split('\n') if c.strip()]
-            rep_lignes = [re.sub(r'^[-*•]\s*|^\d+[\.\)]\s*|^[A-Ea-e][\.\)]\s*', '', r).strip() for r in r_part.split('\n') if r.strip()]
+            # On détecte automatiquement les numéros des bonnes réponses 
+            for i in range(1, 6):
+                if str(i) in rep_text:
+                    bonnes_reponses_list.append(choix_list[i-1])
+                    
+            if not bonnes_reponses_list:
+                bonnes_reponses_list = [c1] # Sécurité absolue
+                
+            questions.append({
+                "type": "QRM",
+                "question": amorce,
+                "choix": choix_list,
+                "bonnes_reponses": bonnes_reponses_list,
+                "explication": [exp if exp else "Explication non générée (texte coupé)."],
+                "indice": "Relis attentivement les détails cliniques de chaque proposition.",
+                "mnemotechnique": "Concentre-toi sur les mots-clés majeurs du cours."
+            })
             
-            if q_part and len(choix_lignes) >= 2 and rep_lignes:
-                questions.append({
-                    "type": "QRM",
-                    "question": q_part,
-                    "choix": choix_lignes,
-                    "bonnes_reponses": rep_lignes,
-                    "explication": [e_part],
-                    "indice": "Relis attentivement les détails cliniques de chaque proposition.",
-                    "mnemotechnique": "Concentre-toi sur les mots-clés majeurs du cours."
-                })
         except Exception:
             continue
             
     if not questions:
-        raise Exception(f"L'IA a utilisé un format indéchiffrable. Voici ce qu'elle a répondu :\n\n{texte_ia[:500]}")
+        raise Exception(f"L'IA a généré un texte vide ou a été bloquée par le filtre de sécurité. Extrait :\n\n{texte_ia[:500]}")
         
     return {"questions": questions}
 
@@ -122,35 +148,35 @@ Matière : {matiere} | Difficulté : {difficulte}/10 (Niveau Concours très exig
 MISSION :
 Tu dois générer {nb_qcm} questions à réponses multiples (QRM). 
 
-RÈGLE D'OR (ANTI-HALLUCINATION) : 
-INTERDICTION ABSOLUE d'utiliser tes propres connaissances. Base-toi EXCLUSIVEMENT sur les images du cours manuscrit ou tapé fourni. Si une information n'est pas sur le document, ne pose pas de question dessus.
+RÉFÉRENCE DE STYLE OBLIGATOIRE :
+Conforme tes questions EXACTEMENT à l'exigence et au style de l'archive "exemples QCM MIP-AP_parasito.docx".
+1. L'AMORCE : Une phrase introductive directe ou une mise en situation clinique très détaillée.
+2. LES CHOIX : EXACTEMENT 5 propositions de réponses par question. Des phrases très longues, denses et techniques.
+3. LES PIÈGES : Il peut y avoir UNE ou PLUSIEURS bonnes réponses.
+Base-toi EXCLUSIVEMENT sur les images du cours manuscrit ou tapé fourni.
 
-STYLE DE QUESTION (CALQUÉ SUR LES EXAMENS VÉTÉRINAIRES OFFICIELS) :
-1. L'AMORCE : Une phrase introductive directe ou une mise en situation clinique complexe.
-2. LES CHOIX : EXACTEMENT 5 propositions de réponses par question.
-3. LA DENSITÉ : Des phrases longues, détaillées et très techniques.
-4. LES PIÈGES : Il peut y avoir UNE ou PLUSIEURS bonnes réponses exactes.
+RÈGLE INFORMATIQUE ABSOLUE (BALISES STRICTES) :
+Tu ne dois produire AUCUN texte avant ou après (ni introduction, ni politesse). 
+Tu dois STRICTEMENT utiliser ces balises pour structurer CHAQUE question, c'est vital pour le système :
 
-RÈGLE INFORMATIQUE ABSOLUE (FORMAT TEXTE STRICT) :
-TU NE DOIS JAMAIS UTILISER LE FORMAT JSON.
-NE FAIS AUCUNE PHRASE D'INTRODUCTION. Ne dis pas "Bonjour" ni "Voici les questions". COMMENCE IMMÉDIATEMENT par le mot "QUESTION :".
-Tu dois formater CHAQUE question EXACTEMENT comme le modèle ci-dessous :
-
-QUESTION:
-[Texte de l'amorce ou de la situation clinique]
-
-CHOIX:
-- [Proposition 1 longue et détaillée]
-- [Proposition 2 longue et détaillée]
-- [Proposition 3 longue et détaillée]
-- [Proposition 4 longue et détaillée]
-- [Proposition 5 longue et détaillée]
-
-BONNES_REPONSES:
-- [COPIE-COLLE EXACTEMENT À L'IDENTIQUE LA OU LES PROPOSITIONS CORRECTES]
-
-EXPLICATION:
-[Explication détaillée issue du cours]
+@DEBUT_QUESTION
+@AMORCE
+[Ton texte d'introduction de la question]
+@CHOIX_1
+[Texte détaillé du premier choix]
+@CHOIX_2
+[Texte détaillé du deuxième choix]
+@CHOIX_3
+[Texte détaillé du troisième choix]
+@CHOIX_4
+[Texte détaillé du quatrième choix]
+@CHOIX_5
+[Texte détaillé du cinquième choix]
+@REPONSES_CORRECTES
+[Uniquement les numéros des bonnes réponses, ex: 1, 4]
+@EXPLICATION
+[Ton explication détaillée]
+@FIN_QUESTION
 """
 
 def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key):
@@ -188,7 +214,7 @@ def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est
     try:
         texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text']
     except KeyError:
-        raise Exception("Le filtre de sécurité de l'IA a bloqué la génération (vocabulaire perçu comme trop clinique). Essaie d'analyser d'autres pages.")
+        raise Exception("Le filtre de sécurité de l'IA a bloqué la génération (vocabulaire perçu comme trop clinique ou violent). Essaie d'analyser d'autres pages.")
         
     return parser_texte_naturel(texte_ia)
 
@@ -215,7 +241,7 @@ if f_pdf:
     doc_t.close()
     
     with st.form("formulaire_generation"):
-        st.warning("⚠️ Astuce : Analyse des blocs de 3 à 6 pages maximum. L'extracteur intelligent (Regex) est activé.")
+        st.warning("⚠️ Astuce : Analyse des blocs de 3 à 6 pages maximum. Le bouclier de balisage est activé.")
         p_deb, p_fin = st.slider("Pages à analyser :", 1, p_tot, (1, min(5, p_tot)))
         bouton_generer = st.form_submit_button("🚀 Générer le Test", type="primary", use_container_width=True)
         
@@ -223,7 +249,7 @@ if f_pdf:
             if not api_key: 
                 st.error("Clé API manquante ! Renseigne-la dans la barre latérale.")
             else:
-                with st.spinner(f"Génération de {nombre_qcm} questions avancées (Extracteur Intelligent activé)..."):
+                with st.spinner(f"Génération de {nombre_qcm} questions complexes avec le format d'examen officiel..."):
                     try:
                         images = extraire_images_pdf(f_pdf, p_deb, p_fin)
                         txt_w = lire_word(f_word) if f_word else ""
