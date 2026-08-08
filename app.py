@@ -6,6 +6,7 @@ from datetime import datetime
 import re
 import requests
 import base64
+import time
 
 # ==============================================================================
 # 1. Configuration et Design Premium
@@ -27,7 +28,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Utilitaires & Bouclier INCASSABLE (Scanner à Rayons X)
+# 2. Utilitaires & Bouclier INCASSABLE
 # ==============================================================================
 if 'cahier_memoire' not in st.session_state:
     st.session_state['cahier_memoire'] = {}
@@ -66,19 +67,15 @@ def lire_word(buffer_fichier):
     doc = docx.Document(buffer_fichier)
     return " ".join([para.text for para in doc.paragraphs])
 
-# LE SCANNER ULTIME : S'en fiche des sauts de ligne, du gras, ou des underscores manquants !
+# PARSER BLINDÉ
 def parser_texte_naturel(texte_ia):
-    # On détruit le formatage Markdown qui pourrait brouiller la lecture
     texte_ia = texte_ia.replace('**', '').replace('__', '')
-    
     questions = []
-    # On découpe purement sur la balise DEBUT_QUESTION
     blocs = re.split(r'(?i)@DEBUT_QUESTION', texte_ia)
     
     for bloc in blocs[1:]:
         if not bloc.strip(): continue
         try:
-            # L'extracteur intelligent : il cherche la balise A, et ramasse TOUT jusqu'à la balise B
             def get_tag_content(pattern, text):
                 match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
                 return match.group(1).strip() if match else ""
@@ -93,7 +90,6 @@ def parser_texte_naturel(texte_ia):
             rep_text = get_tag_content(r'@REPONSES?_?CORRECTES?\s*:?\s*(.*?)(?=@EXPLICATIONS?)', bloc)
             exp = get_tag_content(r'@EXPLICATIONS?\s*:?\s*(.*?)(?=@FIN_QUESTION|$)', bloc)
 
-            # Nettoyeur de puces (retire les -, *, 1., A) au début des réponses)
             def clean_choice(text):
                 return re.sub(r'^[-*•\d\.\)]+\s*', '', text).strip()
 
@@ -101,24 +97,19 @@ def parser_texte_naturel(texte_ia):
             c1, c2, c3, c4, c5 = map(clean_choice, [c1, c2, c3, c4, c5])
             choix_list = [c1, c2, c3, c4, c5]
             
-            # Si un choix majeur manque (coupure d'API), on saute cette question sans crasher
             if not amorce or not c1 or not c5 or not rep_text:
                 continue 
                 
             bonnes_reponses_list = []
-            
-            # 1. On cherche les numéros des bonnes réponses
             for i in range(1, 6):
                 if str(i) in rep_text:
                     bonnes_reponses_list.append(choix_list[i-1])
                     
-            # 2. Sécurité : Si l'IA a copié le texte au lieu d'écrire le numéro
             if not bonnes_reponses_list:
                 for c in choix_list:
                     if c and c.lower()[:20] in rep_text.lower():
                         bonnes_reponses_list.append(c)
                         
-            # 3. Sécurité absolue : S'il y a un plantage logique de l'IA, on coche la A par défaut
             if not bonnes_reponses_list:
                 bonnes_reponses_list = [c1] 
                 
@@ -127,7 +118,7 @@ def parser_texte_naturel(texte_ia):
                 "question": amorce,
                 "choix": choix_list,
                 "bonnes_reponses": bonnes_reponses_list,
-                "explication": [exp if exp else "Explication non générée (texte coupé en fin de rédaction)."],
+                "explication": [exp if exp else "Explication non générée."],
                 "indice": "Relis attentivement les détails cliniques ou biologiques de chaque proposition.",
                 "mnemotechnique": "Concentre-toi sur les mots-clés majeurs du cours."
             })
@@ -135,100 +126,111 @@ def parser_texte_naturel(texte_ia):
         except Exception:
             continue
             
-    if not questions:
-        raise Exception(f"L'IA a généré un texte illisible (ou bloqué). Voici les 2000 premiers caractères pour comprendre :\n\n{texte_ia[:2000]}")
-        
     return {"questions": questions}
 
 # ==============================================================================
-# 3. Moteur IA (Format Examen Vétérinaire 50/50 + COMPTEUR FORCÉ)
+# 3. Moteur IA (LE SYSTÈME EN BOUCLE AUTOMATIQUE)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur de médecine vétérinaire, spécialisé EXCLUSIVEMENT en pathologie et biologie infectieuse.
-Matière : {matiere} | Difficulté : {difficulte}/10 (Niveau Concours très exigeant).
+Matière : {matiere} | Difficulté : {difficulte}/10.
 
-MISSION (COMPTAGE OBLIGATOIRE) :
-Tu dois générer EXACTEMENT {nb_qcm} questions à réponses multiples (QRM). Pas une de moins.
-Tu DOIS numéroter chaque balise de début de question (ex: @DEBUT_QUESTION 1/{nb_qcm}, @DEBUT_QUESTION 2/{nb_qcm}...).
-C'EST UN ORDRE STRICT : Tu ne dois pas t'arrêter avant d'avoir atteint la question {nb_qcm}/{nb_qcm}.
+MISSION :
+Tu dois générer EXACTEMENT {nb_qcm} questions à réponses multiples (QRM). 
 
 RÈGLE D'OR (ANTI-HALLUCINATION) : 
 INTERDICTION ABSOLUE d'utiliser tes propres connaissances. Base-toi EXCLUSIVEMENT sur les images du document. 
 
-RÉPARTITION DES QUESTIONS (50/50 OBLIGATOIRE) :
-Génère environ 50% de questions de TYPE 1 et 50% de questions de TYPE 2. Il y a TOUJOURS 5 choix longs par question.
+RÉPARTITION 50/50 OBLIGATOIRE :
+Génère un mélange de TYPE 1 et TYPE 2. Il y a TOUJOURS 5 choix longs par question.
 
 TYPE 1 : CAS CLINIQUE DE DÉDUCTION (SANS DIAGNOSTIC)
-- L'AMORCE : Décris une situation clinique (espèce, symptômes, âge, contexte) MAIS NE DONNE SURTOUT PAS LE NOM DE LA MALADIE OU DU PATHOGÈNE.
-- LES CHOIX : Les 5 propositions doivent être des déductions diagnostiques, des théories (ex: "Vous suspectez X car..."), des choix d'examens complémentaires et ce qu'ils révéleraient, ou des propositions thérapeutiques logiques.
+- L'AMORCE : Décris une situation clinique (espèce, symptômes, contexte) SANS DONNER LE DIAGNOSTIC.
+- CHOIX : Déductions diagnostiques, théories, examens ou thérapeutiques logiques.
 
 TYPE 2 : PATHOLOGIE/BIOLOGIE (AVEC DIAGNOSTIC CONNU)
-- L'AMORCE : Donne directement le diagnostic ou le nom du pathogène (ex: "Concernant l'ascaridiose porcine due à Ascaris suum...").
-- LES CHOIX : Les 5 propositions doivent être des phrases très longues, denses et techniques sur la biologie, l'épidémiologie, le cycle, ou les caractéristiques de l'agent.
+- L'AMORCE : Donne directement le diagnostic.
+- CHOIX : Phrases très longues, denses et techniques sur la biologie et le cycle de l'agent.
 
-RÈGLE INFORMATIQUE ABSOLUE (BALISES STRICTES) :
-Tu ne dois produire AUCUN texte avant ou après. 
-SAUT DE LIGNE OBLIGATOIRE APRÈS CHAQUE BALISE.
-Tu dois STRICTEMENT utiliser ces balises pour structurer CHAQUE question :
-
-@DEBUT_QUESTION 1/{nb_qcm}
+RÈGLE INFORMATIQUE (BALISES STRICTES) :
+@DEBUT_QUESTION
 @AMORCE
-[Ton texte d'introduction de la question]
+[Ton texte d'introduction]
 @CHOIX_1
-[Texte détaillé du premier choix]
+[Texte détaillé du choix 1]
 @CHOIX_2
-[Texte détaillé du deuxième choix]
+[Texte détaillé du choix 2]
 @CHOIX_3
-[Texte détaillé du troisième choix]
+[Texte détaillé du choix 3]
 @CHOIX_4
-[Texte détaillé du quatrième choix]
+[Texte détaillé du choix 4]
 @CHOIX_5
-[Texte détaillé du cinquième choix]
+[Texte détaillé du choix 5]
 @REPONSES_CORRECTES
-[Uniquement les numéros des bonnes réponses, ex: 1, 4]
+[Numéros des bonnes réponses, ex: 1, 4]
 @EXPLICATION
 [Ton explication détaillée]
 @FIN_QUESTION
 """
 
-def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key):
-    prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nb_qcm=nombre_qcm)
+def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm_cible, api_key, st_progress):
     cle_propre = re.sub(r'[^a-zA-Z0-9_-]', '', api_key)
-    
     url_b64 = "aHR0cHM6Ly9nZW5lcmF0aXZlbGFuZ3VhZ2UuZ29vZ2xlYXBpcy5jb20vdjFiZXRhL21vZGVscy9nZW1pbmktMi41LWZsYXNoOmdlbmVyYXRlQ29udGVudA=="
     url_base = base64.b64decode(url_b64).decode("utf-8")
-    
-    parts = [{"text": prompt + "\nVoici les pages du cours à analyser :\n"}]
-    parts.extend(images_pdf)
-    if texte_word:
-        parts.append({"text": "\nNOTES SUPPLÉMENTAIRES :\n" + texte_word})
-        
-    payload = {
-        "contents": [{"parts": parts}], 
-        "generationConfig": {
-            "temperature": 0.3, 
-            "maxOutputTokens": 8192
-        },
-        "safetySettings": [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"}
-        ]
-    }
     
     session = requests.Session()
     session.trust_env = False
     
-    rep = session.post(url_base, params={"key": cle_propre}, json=payload)
-    if rep.status_code != 200: raise Exception(f"Erreur API ({rep.status_code}) : {rep.text}")
+    questions_accumulees = []
+    tentative = 0
+    max_tentatives = 10 # Autorise jusqu'à 10 petits allers-retours avec l'IA
     
-    try:
-        texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text']
-    except KeyError:
-        raise Exception("Le filtre de sécurité de l'IA a bloqué la génération (vocabulaire perçu comme trop clinique ou violent). Essaie d'analyser d'autres pages.")
+    # LA BOUCLE MAGIQUE : On force l'IA à travailler jusqu'à atteindre le quota exact
+    while len(questions_accumulees) < nombre_qcm_cible and tentative < max_tentatives:
+        qcm_manquants = nombre_qcm_cible - len(questions_accumulees)
         
-    return parser_texte_naturel(texte_ia)
+        # On ne lui demande que 3 questions MAXIMUM par requête pour qu'elle ne coupe JAMAIS son texte
+        nb_a_demander = min(qcm_manquants, 3) 
+        
+        st_progress.info(f"⏳ L'IA rédige minutieusement tes questions... ({len(questions_accumulees)} / {nombre_qcm_cible} prêtes)")
+        
+        prompt = SYSTEM_PROMPT.format(matiere=matiere, difficulte=difficulte, nb_qcm=nb_a_demander)
+        
+        parts = [{"text": prompt + "\nVoici les pages du cours à analyser :\n"}]
+        parts.extend(images_pdf)
+        if texte_word:
+            parts.append({"text": "\nNOTES SUPPLÉMENTAIRES :\n" + texte_word})
+            
+        payload = {
+            "contents": [{"parts": parts}], 
+            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 8192},
+            "safetySettings": [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"}
+            ]
+        }
+        
+        try:
+            rep = session.post(url_base, params={"key": cle_propre}, json=payload)
+            if rep.status_code == 200:
+                texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text']
+                resultat = parser_texte_naturel(texte_ia)
+                
+                # On ajoute les nouvelles questions validées à notre panier
+                questions_accumulees.extend(resultat["questions"])
+        except Exception as e:
+            time.sleep(1) # Petite pause en cas de saturation réseau
+            pass
+            
+        tentative += 1
+        
+    if not questions_accumulees:
+        raise Exception("Impossible de générer les questions. Vérifie tes PDF ou réessaie avec une autre page.")
+        
+    # On renvoie EXACTEMENT le nombre de questions demandées
+    return {"questions": questions_accumulees[:nombre_qcm_cible]}
 
 # ==============================================================================
 # 4. Interface Graphique
@@ -253,7 +255,7 @@ if f_pdf:
     doc_t.close()
     
     with st.form("formulaire_generation"):
-        st.warning("⚠️ Astuce : Analyse des blocs de 3 à 6 pages maximum pour garantir la profondeur des questions.")
+        st.warning("⚠️ Astuce : La nouvelle IA travaille par 'petits lots' en arrière-plan pour garantir le quota et la qualité.")
         p_deb, p_fin = st.slider("Pages à analyser :", 1, p_tot, (1, min(5, p_tot)))
         bouton_generer = st.form_submit_button("🚀 Générer le Test", type="primary", use_container_width=True)
         
@@ -261,21 +263,23 @@ if f_pdf:
             if not api_key: 
                 st.error("Clé API manquante ! Renseigne-la dans la barre latérale.")
             else:
-                with st.spinner(f"Génération de {nombre_qcm} questions (Forçage du quota & Mélange Clinique/Théorie)..."):
-                    try:
-                        images = extraire_images_pdf(f_pdf, p_deb, p_fin)
-                        txt_w = lire_word(f_word) if f_word else ""
-                        donnees = generer_donnees(images, txt_w, matiere, difficulte, nombre_qcm, mode_examen, api_key)
-                        
-                        if len(donnees['questions']) < nombre_qcm:
-                            st.toast(f"⚠️ L'IA a atteint sa limite de mots et s'est arrêtée à {len(donnees['questions'])} questions. C'est le maximum possible pour ce niveau de détail !", icon="ℹ️")
-                            
-                        st.session_state['data'] = donnees
-                        st.session_state['examen_soumis'] = False
-                        st.session_state['reponses_utilisateur'] = {} 
-                        st.rerun()
-                    except Exception as e: 
-                        st.error(f"❌ {e}")
+                st_progress = st.empty()
+                try:
+                    images = extraire_images_pdf(f_pdf, p_deb, p_fin)
+                    txt_w = lire_word(f_word) if f_word else ""
+                    
+                    donnees = generer_donnees(images, txt_w, matiere, difficulte, nombre_qcm, api_key, st_progress)
+                    
+                    st_progress.success("✅ Génération terminée avec succès !")
+                    st.session_state['data'] = donnees
+                    st.session_state['examen_soumis'] = False
+                    st.session_state['reponses_utilisateur'] = {} 
+                    time.sleep(1) # Laisse le temps de voir le message de succès
+                    st_progress.empty() # Efface le message
+                    st.rerun()
+                except Exception as e: 
+                    st_progress.empty()
+                    st.error(f"❌ {e}")
 
 if 'data' in st.session_state:
     data = st.session_state['data']
