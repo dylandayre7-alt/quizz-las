@@ -27,7 +27,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Utilitaires & Bouclier INCASSABLE (Balises de Titane)
+# 2. Utilitaires & Bouclier INCASSABLE (Balises de Titane & Compteur)
 # ==============================================================================
 if 'cahier_memoire' not in st.session_state:
     st.session_state['cahier_memoire'] = {}
@@ -66,16 +66,15 @@ def lire_word(buffer_fichier):
     doc = docx.Document(buffer_fichier)
     return " ".join([para.text for para in doc.paragraphs])
 
-# LE PARSER ULTIME : Immunisé contre les absences de retours à la ligne et les coupures
+# LE PARSER ULTIME : Immunisé contre les coupures et comprend la numérotation
 def parser_texte_naturel(texte_ia):
     questions = []
-    # On isole chaque question avec la balise de départ
-    blocs = re.split(r'(?i)@DEBUT_QUESTION', texte_ia)
+    # On découpe peu importe ce qu'il y a après "@DEBUT_QUESTION" (ex: 1/6, 2/6)
+    blocs = re.split(r'(?i)@DEBUT_QUESTION[^\n]*', texte_ia)
     
     for bloc in blocs[1:]:
         if not bloc.strip(): continue
         try:
-            # Fonctions chirurgicales pour extraire le texte exact entre deux balises
             def extract_between(start_tag, end_tag, text):
                 pattern = rf"{start_tag}\s*:?\s*(.*?){end_tag}"
                 match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
@@ -87,7 +86,6 @@ def parser_texte_naturel(texte_ia):
                 return match.group(1).strip() if match else ""
 
             def clean_choice(text):
-                # Supprime les "1.", "A)", "-" que l'IA pourrait rajouter au début
                 return re.sub(r'^[-*•\d\.\)]+\s*', '', text).strip()
 
             amorce = extract_between("@AMORCE", "@CHOIX_1", bloc)
@@ -99,26 +97,24 @@ def parser_texte_naturel(texte_ia):
             
             rep_text = extract_between("@REPONSES_CORRECTES", "@EXPLICATION", bloc)
             
-            # Gestion de la coupure de texte en pleine explication
             if "@FIN_QUESTION" in bloc.upper():
                 exp = extract_between("@EXPLICATION", "@FIN_QUESTION", bloc)
             else:
                 exp = extract_after("@EXPLICATION", bloc)
                 
-            # S'il manque un des choix à cause d'une coupure majeure, on ignore juste cette question
+            # Si un choix manque, on saute (sécurité)
             if not amorce or not c1 or not c5 or not rep_text:
                 continue 
                 
             choix_list = [c1, c2, c3, c4, c5]
             bonnes_reponses_list = []
             
-            # On détecte automatiquement les numéros des bonnes réponses 
             for i in range(1, 6):
                 if str(i) in rep_text:
                     bonnes_reponses_list.append(choix_list[i-1])
                     
             if not bonnes_reponses_list:
-                bonnes_reponses_list = [c1] # Sécurité absolue
+                bonnes_reponses_list = [c1] 
                 
             questions.append({
                 "type": "QRM",
@@ -134,19 +130,21 @@ def parser_texte_naturel(texte_ia):
             continue
             
     if not questions:
-        raise Exception(f"L'IA a généré un texte vide ou a été bloquée par le filtre de sécurité. Extrait :\n\n{texte_ia[:500]}")
+        raise Exception(f"L'IA a généré un texte vide ou a été bloquée. Extrait :\n\n{texte_ia[:500]}")
         
     return {"questions": questions}
 
 # ==============================================================================
-# 3. Moteur IA (Format Examen Vétérinaire Réparti 50/50)
+# 3. Moteur IA (Format Examen Vétérinaire + COMPTEUR FORCÉ)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur de médecine vétérinaire, spécialisé EXCLUSIVEMENT en pathologie et biologie infectieuse.
 Matière : {matiere} | Difficulté : {difficulte}/10 (Niveau Concours très exigeant).
 
-MISSION :
-Tu dois générer {nb_qcm} questions à réponses multiples (QRM). 
+MISSION (COMPTAGE OBLIGATOIRE ET STRICT) :
+Tu dois générer EXACTEMENT {nb_qcm} questions à réponses multiples (QRM). Pas une de moins.
+Pour t'empêcher de t'arrêter trop tôt, tu DOIS numéroter chaque balise de début de question (ex: @DEBUT_QUESTION 1/{nb_qcm}, @DEBUT_QUESTION 2/{nb_qcm}...).
+IL EST STRICTEMENT INTERDIT de t'arrêter avant d'avoir atteint et terminé la question {nb_qcm}/{nb_qcm}.
 
 RÈGLE D'OR (ANTI-HALLUCINATION) : 
 INTERDICTION ABSOLUE d'utiliser tes propres connaissances. Base-toi EXCLUSIVEMENT sur les images du cours manuscrit ou tapé fourni. Si une information n'est pas sur le document, ne pose pas de question dessus.
@@ -164,9 +162,9 @@ TYPE 2 : PATHOLOGIE/BIOLOGIE (AVEC DIAGNOSTIC CONNU)
 
 RÈGLE INFORMATIQUE ABSOLUE (BALISES STRICTES) :
 Tu ne dois produire AUCUN texte avant ou après (ni introduction, ni politesse). 
-Tu dois STRICTEMENT utiliser ces balises pour structurer CHAQUE question, c'est vital pour le système :
+Tu dois STRICTEMENT utiliser ces balises pour structurer CHAQUE question :
 
-@DEBUT_QUESTION
+@DEBUT_QUESTION 1/{nb_qcm}
 @AMORCE
 [Ton texte d'introduction de la question (Type 1 ou Type 2)]
 @CHOIX_1
@@ -201,7 +199,7 @@ def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est
     payload = {
         "contents": [{"parts": parts}], 
         "generationConfig": {
-            "temperature": 0.3, # Légèrement augmenté pour favoriser la diversité des deux types de questions
+            "temperature": 0.3, 
             "maxOutputTokens": 8192
         },
         "safetySettings": [
@@ -248,7 +246,7 @@ if f_pdf:
     doc_t.close()
     
     with st.form("formulaire_generation"):
-        st.warning("⚠️ Astuce : Analyse des blocs de 3 à 6 pages maximum. Le bouclier de balisage est activé.")
+        st.warning("⚠️ Astuce : Analyse des blocs de 3 à 6 pages maximum pour garantir la profondeur des questions.")
         p_deb, p_fin = st.slider("Pages à analyser :", 1, p_tot, (1, min(5, p_tot)))
         bouton_generer = st.form_submit_button("🚀 Générer le Test", type="primary", use_container_width=True)
         
@@ -256,11 +254,17 @@ if f_pdf:
             if not api_key: 
                 st.error("Clé API manquante ! Renseigne-la dans la barre latérale.")
             else:
-                with st.spinner(f"Génération de {nombre_qcm} questions (Mélange Cas Cliniques / Théorie)..."):
+                with st.spinner(f"Génération de {nombre_qcm} questions (Forçage du quota & Mélange Clinique/Théorie)..."):
                     try:
                         images = extraire_images_pdf(f_pdf, p_deb, p_fin)
                         txt_w = lire_word(f_word) if f_word else ""
-                        st.session_state['data'] = generer_donnees(images, txt_w, matiere, difficulte, nombre_qcm, mode_examen, api_key)
+                        donnees = generer_donnees(images, txt_w, matiere, difficulte, nombre_qcm, mode_examen, api_key)
+                        
+                        # Affichage d'un petit message si l'IA s'est quand même arrêtée avant la fin (limite technique)
+                        if len(donnees['questions']) < nombre_qcm:
+                            st.toast(f"⚠️ L'IA a atteint sa limite de mots et s'est arrêtée à {len(donnees['questions'])} questions. C'est le maximum possible pour ce niveau de détail !", icon="ℹ️")
+                            
+                        st.session_state['data'] = donnees
                         st.session_state['examen_soumis'] = False
                         st.session_state['reponses_utilisateur'] = {} 
                         st.rerun()
