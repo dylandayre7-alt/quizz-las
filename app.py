@@ -1,6 +1,5 @@
 import streamlit as st
 import fitz  # PyMuPDF
-import json
 import pandas as pd
 import docx
 from datetime import datetime
@@ -28,7 +27,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Utilitaires & Bouclier Anti-Coupure (Le Compteur d'Accolades)
+# 2. Utilitaires & Bouclier INCASSABLE (Fin du JSON)
 # ==============================================================================
 if 'cahier_memoire' not in st.session_state:
     st.session_state['cahier_memoire'] = {}
@@ -74,81 +73,89 @@ def lire_word(buffer_fichier):
     doc = docx.Document(buffer_fichier)
     return " ".join([para.text for para in doc.paragraphs])
 
-def sauvetage_json_coupe(texte_ia):
-    # 1. On tente une lecture normale au cas où l'IA a fini son texte proprement
-    try:
-        texte_propre = texte_ia.strip()
-        if texte_propre.startswith("```json"): texte_propre = texte_propre[7:]
-        if texte_propre.startswith("```"): texte_propre = texte_propre[3:]
-        if texte_propre.endswith("```"): texte_propre = texte_propre[:-3]
-        return json.loads(texte_propre.strip(), strict=False)
+# NOUVEAU PARSER BLINDÉ CONTRE LES COUPURES
+def parser_texte_naturel(texte_ia):
+    questions = []
+    # On découpe le texte brut à chaque balise QUESTION:
+    blocs = re.split(r'QUESTION\s*:', texte_ia, flags=re.IGNORECASE)
     
-    # 2. PLAN B: Si le texte est coupé en plein milieu, on active l'extracteur chirurgical
-    except Exception:
-        questions_sauvees = []
-        # On repère l'emplacement exact de chaque nouvelle question
-        starts = [m.start() for m in re.finditer(r'\{\s*"type"', texte_ia)]
-        
-        for start_idx in starts:
-            accolades = 0
-            dans_guillemets = False
-            echappe = False
+    for bloc in blocs[1:]:
+        if not bloc.strip():
+            continue
+        try:
+            # Découpage chirurgical des sections
+            q_part = re.split(r'CHOIX\s*:', bloc, flags=re.IGNORECASE)[0].strip()
             
-            for i in range(start_idx, len(texte_ia)):
-                char = texte_ia[i]
-                
-                # Gestion des guillemets pour ne pas compter les accolades à l'intérieur du texte
-                if char == '"' and not echappe:
-                    dans_guillemets = not dans_guillemets
-                
-                if not dans_guillemets:
-                    if char == '{': accolades += 1
-                    elif char == '}': accolades -= 1
-                    
-                # Gestion des caractères d'échappement (ex: \")
-                if char == '\\' and not echappe:
-                    echappe = True
-                else:
-                    echappe = False
-                
-                # Si le compteur d'accolades retombe à 0, l'objet de la question est complet !
-                if accolades == 0:
-                    try:
-                        q_obj = json.loads(texte_ia[start_idx:i+1], strict=False)
-                        if 'question' in q_obj and 'choix' in q_obj and 'bonnes_reponses' in q_obj:
-                            questions_sauvees.append(q_obj)
-                    except:
-                        pass
-                    break # On passe à la question suivante
-                    
-        # Si on a réussi à sauver au moins une question, on renvoie la liste sans faire planter l'application
-        if len(questions_sauvees) > 0:
-            if len(questions_sauvees) < 5:
-                st.toast("⚠️ L'IA a coupé court car les questions demandées étaient trop longues. J'ai récupéré ce qui était possible !", icon="🛡️")
-            return {"questions": questions_sauvees}
-        else:
-            raise Exception("Impossible de lire les questions. Essaie de demander moins de questions d'un coup.")
+            reste = re.split(r'CHOIX\s*:', bloc, flags=re.IGNORECASE)[1]
+            c_part = re.split(r'BONNES_REPONSES\s*:', reste, flags=re.IGNORECASE)[0].strip()
+            
+            reste2 = re.split(r'BONNES_REPONSES\s*:', reste, flags=re.IGNORECASE)[1]
+            r_part = re.split(r'EXPLICATION\s*:', reste2, flags=re.IGNORECASE)[0].strip()
+            
+            e_part = re.split(r'EXPLICATION\s*:', reste2, flags=re.IGNORECASE)[1].strip()
+            
+            # Nettoyage des tirets, puces ou numéros (ex: "1.", "-", "A)") pour un matching parfait
+            choix_lignes = [re.sub(r'^[-*•\d\.\)]+\s*', '', c).strip() for c in c_part.split('\n') if c.strip()]
+            rep_lignes = [re.sub(r'^[-*•\d\.\)]+\s*', '', r).strip() for r in r_part.split('\n') if r.strip()]
+            
+            # On n'ajoute la question que si elle a toutes ses parties intactes
+            if q_part and len(choix_lignes) >= 2 and rep_lignes:
+                questions.append({
+                    "type": "QRM",
+                    "question": q_part,
+                    "choix": choix_lignes,
+                    "bonnes_reponses": rep_lignes,
+                    "explication": [e_part],
+                    "indice": "Relis attentivement les détails cliniques de chaque proposition...",
+                    "mnemotechnique": "Concentre-toi sur les mots-clés du cours."
+                })
+        except Exception:
+            # SI L'IA COUPE LE TEXTE ICI (LIMITE DE MOTS ATTEINTE), ON L'IGNORE SANS FAIRE PLANTER LE SITE
+            continue 
+            
+    if not questions:
+        raise Exception(f"L'IA n'a pas respecté le format demandé ou le filtre de sécurité a bloqué la réponse. Voici un extrait pour comprendre :\n\n{texte_ia[:400]}")
+        
+    return {"questions": questions}
 
 # ==============================================================================
-# 3. Moteur IA (Format Examen Vétérinaire Officiel)
+# 3. Moteur IA (Format Examen Brut - Fini le JSON)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur de médecine vétérinaire, spécialisé EXCLUSIVEMENT en pathologie et biologie infectieuse.
 Matière : {matiere} | Difficulté : {difficulte}/10 (Niveau Concours très exigeant).
 
 MISSION :
-Tu dois générer {nb_qcm} questions à réponses multiples (QRM).
-Génère autant de questions que possible dans la limite de ton espace de réponse.
+Tu dois générer {nb_qcm} questions à réponses multiples (QRM). 
 
 RÈGLE D'OR (ANTI-HALLUCINATION) : 
-INTERDICTION ABSOLUE d'utiliser tes propres connaissances. Base-toi EXCLUSIVEMENT sur les images du cours manuscrit ou tapé fourni. Si une toxine ou un symptôme n'est pas sur le document, ne pose pas de question dessus.
+INTERDICTION ABSOLUE d'utiliser tes propres connaissances. Base-toi EXCLUSIVEMENT sur les images du cours manuscrit ou tapé fourni. Si une information n'est pas sur le document, ne pose pas de question dessus.
 
 STYLE DE QUESTION (CALQUÉ SUR LES EXAMENS VÉTÉRINAIRES OFFICIELS) :
-Tes questions doivent avoir EXACTEMENT la même structure et la même complexité que les vrais examens :
-1. L'AMORCE : Une phrase introductive directe (ex: "Le pathogène X est responsable de...") OU une mise en situation clinique (ex: "Une exploitation vous consulte pour... Parmi les étiologies :").
-2. LES CHOIX : EXACTEMENT 5 propositions de réponses par question (jamais 4, jamais 6).
-3. LA DENSITÉ : Les propositions doivent être des phrases longues, détaillées et techniques (mélangeant stades de développement, signes cliniques, diagnostic, étiologie ou prévention).
-4. LES PIÈGES : Crée des pièges subtils dans ces longues phrases. Il peut y avoir UNE ou PLUSIEURS bonnes réponses.
+1. L'AMORCE : Une phrase introductive directe ou une mise en situation clinique complexe.
+2. LES CHOIX : EXACTEMENT 5 propositions de réponses par question.
+3. LA DENSITÉ : Des phrases longues, détaillées et très techniques.
+4. LES PIÈGES : Il peut y avoir UNE ou PLUSIEURS bonnes réponses exactes.
+
+RÈGLE INFORMATIQUE ABSOLUE (FORMAT TEXTE STRICT) :
+TU NE DOIS JAMAIS UTILISER LE FORMAT JSON.
+Tu dois formater CHAQUE question EXACTEMENT comme le modèle ci-dessous. N'utilise pas d'accolades.
+
+QUESTION:
+[Texte de l'amorce ou de la situation clinique]
+
+CHOIX:
+- [Proposition 1 longue et détaillée]
+- [Proposition 2 longue et détaillée]
+- [Proposition 3 longue et détaillée]
+- [Proposition 4 longue et détaillée]
+- [Proposition 5 longue et détaillée]
+
+BONNES_REPONSES:
+- [COPIE-COLLE EXACTEMENT À L'IDENTIQUE LA OU LES PROPOSITIONS CORRECTES]
+
+EXPLICATION:
+[Explication détaillée issue du cours]
 """
 
 def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est_mode_examen, api_key):
@@ -167,31 +174,16 @@ def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est
         "contents": [{"parts": parts}], 
         "generationConfig": {
             "temperature": 0.2, 
-            "maxOutputTokens": 8192,
-            "responseMimeType": "application/json",
-            "responseSchema": {
-                "type": "OBJECT",
-                "properties": {
-                    "questions": {
-                        "type": "ARRAY",
-                        "items": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "type": {"type": "STRING"},
-                                "question": {"type": "STRING"},
-                                "choix": {"type": "ARRAY", "items": {"type": "STRING"}},
-                                "bonnes_reponses": {"type": "ARRAY", "items": {"type": "STRING"}},
-                                "explication": {"type": "ARRAY", "items": {"type": "STRING"}},
-                                "indice": {"type": "STRING"},
-                                "mnemotechnique": {"type": "STRING"}
-                            },
-                            "required": ["type", "question", "choix", "bonnes_reponses", "explication", "indice", "mnemotechnique"]
-                        }
-                    }
-                },
-                "required": ["questions"]
-            }
-        }
+            "maxOutputTokens": 8192
+            # Fin de la prison JSON. L'IA respire.
+        },
+        # Abaissement des filtres de sécurité pour autoriser le vocabulaire médical/abattoir
+        "safetySettings": [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"}
+        ]
     }
     
     session = requests.Session()
@@ -200,8 +192,12 @@ def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est
     rep = session.post(url_base, params={"key": cle_propre}, json=payload)
     if rep.status_code != 200: raise Exception(f"Erreur API ({rep.status_code}) : {rep.text}")
     
-    texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text']
-    return sauvetage_json_coupe(texte_ia)
+    try:
+        texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text']
+    except KeyError:
+        raise Exception(f"Le filtre de sécurité de l'IA a bloqué la génération (vocabulaire médical perçu comme violent). Essaie d'analyser d'autres pages.")
+        
+    return parser_texte_naturel(texte_ia)
 
 # ==============================================================================
 # 4. Interface Graphique
