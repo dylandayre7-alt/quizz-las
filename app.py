@@ -27,7 +27,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Utilitaires & Bouclier INCASSABLE (Balises de Titane & Compteur)
+# 2. Utilitaires & Bouclier INCASSABLE (Scanner à Rayons X)
 # ==============================================================================
 if 'cahier_memoire' not in st.session_state:
     st.session_state['cahier_memoire'] = {}
@@ -66,53 +66,59 @@ def lire_word(buffer_fichier):
     doc = docx.Document(buffer_fichier)
     return " ".join([para.text for para in doc.paragraphs])
 
-# LE PARSER ULTIME : Immunisé contre les coupures et comprend la numérotation
+# LE SCANNER ULTIME : S'en fiche des sauts de ligne, du gras, ou des underscores manquants !
 def parser_texte_naturel(texte_ia):
+    # On détruit le formatage Markdown qui pourrait brouiller la lecture
+    texte_ia = texte_ia.replace('**', '').replace('__', '')
+    
     questions = []
-    # On découpe peu importe ce qu'il y a après "@DEBUT_QUESTION" (ex: 1/6, 2/6)
-    blocs = re.split(r'(?i)@DEBUT_QUESTION[^\n]*', texte_ia)
+    # On découpe purement sur la balise DEBUT_QUESTION
+    blocs = re.split(r'(?i)@DEBUT_QUESTION', texte_ia)
     
     for bloc in blocs[1:]:
         if not bloc.strip(): continue
         try:
-            def extract_between(start_tag, end_tag, text):
-                pattern = rf"{start_tag}\s*:?\s*(.*?){end_tag}"
-                match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
-                return match.group(1).strip() if match else ""
-                
-            def extract_after(start_tag, text):
-                pattern = rf"{start_tag}\s*:?\s*(.*)"
+            # L'extracteur intelligent : il cherche la balise A, et ramasse TOUT jusqu'à la balise B
+            def get_tag_content(pattern, text):
                 match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
                 return match.group(1).strip() if match else ""
 
+            amorce = get_tag_content(r'@AMORCE\s*:?\s*(.*?)(?=@CHOIX_?\s*1)', bloc)
+            c1 = get_tag_content(r'@CHOIX_?\s*1\s*:?\s*(.*?)(?=@CHOIX_?\s*2)', bloc)
+            c2 = get_tag_content(r'@CHOIX_?\s*2\s*:?\s*(.*?)(?=@CHOIX_?\s*3)', bloc)
+            c3 = get_tag_content(r'@CHOIX_?\s*3\s*:?\s*(.*?)(?=@CHOIX_?\s*4)', bloc)
+            c4 = get_tag_content(r'@CHOIX_?\s*4\s*:?\s*(.*?)(?=@CHOIX_?\s*5)', bloc)
+            c5 = get_tag_content(r'@CHOIX_?\s*5\s*:?\s*(.*?)(?=@REPONSES?_?CORRECTES?)', bloc)
+            
+            rep_text = get_tag_content(r'@REPONSES?_?CORRECTES?\s*:?\s*(.*?)(?=@EXPLICATIONS?)', bloc)
+            exp = get_tag_content(r'@EXPLICATIONS?\s*:?\s*(.*?)(?=@FIN_QUESTION|$)', bloc)
+
+            # Nettoyeur de puces (retire les -, *, 1., A) au début des réponses)
             def clean_choice(text):
                 return re.sub(r'^[-*•\d\.\)]+\s*', '', text).strip()
 
-            amorce = extract_between("@AMORCE", "@CHOIX_1", bloc)
-            c1 = clean_choice(extract_between("@CHOIX_1", "@CHOIX_2", bloc))
-            c2 = clean_choice(extract_between("@CHOIX_2", "@CHOIX_3", bloc))
-            c3 = clean_choice(extract_between("@CHOIX_3", "@CHOIX_4", bloc))
-            c4 = clean_choice(extract_between("@CHOIX_4", "@CHOIX_5", bloc))
-            c5 = clean_choice(extract_between("@CHOIX_5", "@REPONSES_CORRECTES", bloc))
+            amorce = amorce.strip()
+            c1, c2, c3, c4, c5 = map(clean_choice, [c1, c2, c3, c4, c5])
+            choix_list = [c1, c2, c3, c4, c5]
             
-            rep_text = extract_between("@REPONSES_CORRECTES", "@EXPLICATION", bloc)
-            
-            if "@FIN_QUESTION" in bloc.upper():
-                exp = extract_between("@EXPLICATION", "@FIN_QUESTION", bloc)
-            else:
-                exp = extract_after("@EXPLICATION", bloc)
-                
-            # Si un choix manque, on saute (sécurité)
+            # Si un choix majeur manque (coupure d'API), on saute cette question sans crasher
             if not amorce or not c1 or not c5 or not rep_text:
                 continue 
                 
-            choix_list = [c1, c2, c3, c4, c5]
             bonnes_reponses_list = []
             
+            # 1. On cherche les numéros des bonnes réponses
             for i in range(1, 6):
                 if str(i) in rep_text:
                     bonnes_reponses_list.append(choix_list[i-1])
                     
+            # 2. Sécurité : Si l'IA a copié le texte au lieu d'écrire le numéro
+            if not bonnes_reponses_list:
+                for c in choix_list:
+                    if c and c.lower()[:20] in rep_text.lower():
+                        bonnes_reponses_list.append(c)
+                        
+            # 3. Sécurité absolue : S'il y a un plantage logique de l'IA, on coche la A par défaut
             if not bonnes_reponses_list:
                 bonnes_reponses_list = [c1] 
                 
@@ -121,7 +127,7 @@ def parser_texte_naturel(texte_ia):
                 "question": amorce,
                 "choix": choix_list,
                 "bonnes_reponses": bonnes_reponses_list,
-                "explication": [exp if exp else "Explication non générée (texte coupé)."],
+                "explication": [exp if exp else "Explication non générée (texte coupé en fin de rédaction)."],
                 "indice": "Relis attentivement les détails cliniques ou biologiques de chaque proposition.",
                 "mnemotechnique": "Concentre-toi sur les mots-clés majeurs du cours."
             })
@@ -130,30 +136,30 @@ def parser_texte_naturel(texte_ia):
             continue
             
     if not questions:
-        raise Exception(f"L'IA a généré un texte vide ou a été bloquée. Extrait :\n\n{texte_ia[:500]}")
+        raise Exception(f"L'IA a généré un texte illisible (ou bloqué). Voici les 2000 premiers caractères pour comprendre :\n\n{texte_ia[:2000]}")
         
     return {"questions": questions}
 
 # ==============================================================================
-# 3. Moteur IA (Format Examen Vétérinaire + COMPTEUR FORCÉ)
+# 3. Moteur IA (Format Examen Vétérinaire 50/50 + COMPTEUR FORCÉ)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur de médecine vétérinaire, spécialisé EXCLUSIVEMENT en pathologie et biologie infectieuse.
 Matière : {matiere} | Difficulté : {difficulte}/10 (Niveau Concours très exigeant).
 
-MISSION (COMPTAGE OBLIGATOIRE ET STRICT) :
+MISSION (COMPTAGE OBLIGATOIRE) :
 Tu dois générer EXACTEMENT {nb_qcm} questions à réponses multiples (QRM). Pas une de moins.
-Pour t'empêcher de t'arrêter trop tôt, tu DOIS numéroter chaque balise de début de question (ex: @DEBUT_QUESTION 1/{nb_qcm}, @DEBUT_QUESTION 2/{nb_qcm}...).
-IL EST STRICTEMENT INTERDIT de t'arrêter avant d'avoir atteint et terminé la question {nb_qcm}/{nb_qcm}.
+Tu DOIS numéroter chaque balise de début de question (ex: @DEBUT_QUESTION 1/{nb_qcm}, @DEBUT_QUESTION 2/{nb_qcm}...).
+C'EST UN ORDRE STRICT : Tu ne dois pas t'arrêter avant d'avoir atteint la question {nb_qcm}/{nb_qcm}.
 
 RÈGLE D'OR (ANTI-HALLUCINATION) : 
-INTERDICTION ABSOLUE d'utiliser tes propres connaissances. Base-toi EXCLUSIVEMENT sur les images du cours manuscrit ou tapé fourni. Si une information n'est pas sur le document, ne pose pas de question dessus.
+INTERDICTION ABSOLUE d'utiliser tes propres connaissances. Base-toi EXCLUSIVEMENT sur les images du document. 
 
 RÉPARTITION DES QUESTIONS (50/50 OBLIGATOIRE) :
-Tu dois générer environ 50% de questions de TYPE 1 et 50% de questions de TYPE 2. Il y a toujours 5 choix longs et denses par question, et une ou plusieurs bonnes réponses.
+Génère environ 50% de questions de TYPE 1 et 50% de questions de TYPE 2. Il y a TOUJOURS 5 choix longs par question.
 
 TYPE 1 : CAS CLINIQUE DE DÉDUCTION (SANS DIAGNOSTIC)
-- L'AMORCE : Décris une situation clinique détaillée (espèce, symptômes, âge, contexte) MAIS NE DONNE SURTOUT PAS LE NOM DE LA MALADIE OU DU PATHOGÈNE.
+- L'AMORCE : Décris une situation clinique (espèce, symptômes, âge, contexte) MAIS NE DONNE SURTOUT PAS LE NOM DE LA MALADIE OU DU PATHOGÈNE.
 - LES CHOIX : Les 5 propositions doivent être des déductions diagnostiques, des théories (ex: "Vous suspectez X car..."), des choix d'examens complémentaires et ce qu'ils révéleraient, ou des propositions thérapeutiques logiques.
 
 TYPE 2 : PATHOLOGIE/BIOLOGIE (AVEC DIAGNOSTIC CONNU)
@@ -161,12 +167,13 @@ TYPE 2 : PATHOLOGIE/BIOLOGIE (AVEC DIAGNOSTIC CONNU)
 - LES CHOIX : Les 5 propositions doivent être des phrases très longues, denses et techniques sur la biologie, l'épidémiologie, le cycle, ou les caractéristiques de l'agent.
 
 RÈGLE INFORMATIQUE ABSOLUE (BALISES STRICTES) :
-Tu ne dois produire AUCUN texte avant ou après (ni introduction, ni politesse). 
+Tu ne dois produire AUCUN texte avant ou après. 
+SAUT DE LIGNE OBLIGATOIRE APRÈS CHAQUE BALISE.
 Tu dois STRICTEMENT utiliser ces balises pour structurer CHAQUE question :
 
 @DEBUT_QUESTION 1/{nb_qcm}
 @AMORCE
-[Ton texte d'introduction de la question (Type 1 ou Type 2)]
+[Ton texte d'introduction de la question]
 @CHOIX_1
 [Texte détaillé du premier choix]
 @CHOIX_2
@@ -260,7 +267,6 @@ if f_pdf:
                         txt_w = lire_word(f_word) if f_word else ""
                         donnees = generer_donnees(images, txt_w, matiere, difficulte, nombre_qcm, mode_examen, api_key)
                         
-                        # Affichage d'un petit message si l'IA s'est quand même arrêtée avant la fin (limite technique)
                         if len(donnees['questions']) < nombre_qcm:
                             st.toast(f"⚠️ L'IA a atteint sa limite de mots et s'est arrêtée à {len(donnees['questions'])} questions. C'est le maximum possible pour ce niveau de détail !", icon="ℹ️")
                             
