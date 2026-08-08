@@ -27,7 +27,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Utilitaires & Bouclier INCASSABLE (Fin du JSON)
+# 2. Utilitaires & Bouclier INCASSABLE (Regex Dynamique)
 # ==============================================================================
 if 'cahier_memoire' not in st.session_state:
     st.session_state['cahier_memoire'] = {}
@@ -45,13 +45,6 @@ def assembler_texte_html(champ):
     texte = '<br><br>'.join([str(c) for c in champ]) if isinstance(champ, list) else str(champ)
     texte = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', texte)
     return texte
-
-def nettoyer_question(texte):
-    t = str(texte)
-    t = re.sub(r'</?h[1-6]>', '', t) 
-    t = t.replace('<br>', ' ')
-    t = t.replace('<strong>', '**').replace('</strong>', '**')
-    return t.strip()
 
 def extraire_images_pdf(buffer_fichier, page_debut, page_fin):
     buffer_fichier.seek(0)
@@ -73,32 +66,34 @@ def lire_word(buffer_fichier):
     doc = docx.Document(buffer_fichier)
     return " ".join([para.text for para in doc.paragraphs])
 
-# NOUVEAU PARSER BLINDÉ CONTRE LES COUPURES
+# NOUVEAU PARSER BLINDÉ AVEC RECHERCHE INTELLIGENTE (REGEX)
 def parser_texte_naturel(texte_ia):
     questions = []
-    # On découpe le texte brut à chaque balise QUESTION:
-    blocs = re.split(r'QUESTION\s*:', texte_ia, flags=re.IGNORECASE)
+    
+    # On découpe à chaque fois qu'on voit le mot QUESTION (avec ou sans numéro)
+    blocs = re.split(r'(?i)QUESTION\s*\d*\s*:', texte_ia)
     
     for bloc in blocs[1:]:
-        if not bloc.strip():
-            continue
+        if not bloc.strip(): continue
+        
         try:
-            # Découpage chirurgical des sections
-            q_part = re.split(r'CHOIX\s*:', bloc, flags=re.IGNORECASE)[0].strip()
+            # Recherche intelligente des mots-clés peu importe comment l'IA les écrit
+            m_choix = re.search(r'(?i)(?:CHOIX|PROPOSITIONS)\s*:', bloc)
+            m_rep = re.search(r'(?i)(?:BONNES?_?\s*R[EÉ]PONSES?|R[EÉ]PONSES?\s*CORRECTES?|R[EÉ]PONSES?)\s*:', bloc)
+            m_exp = re.search(r'(?i)(?:EXPLICATIONS?|JUSTIFICATIONS?)\s*:', bloc)
             
-            reste = re.split(r'CHOIX\s*:', bloc, flags=re.IGNORECASE)[1]
-            c_part = re.split(r'BONNES_REPONSES\s*:', reste, flags=re.IGNORECASE)[0].strip()
+            if not (m_choix and m_rep and m_exp):
+                continue # Il manque une section vitale, on l'ignore sans crasher
             
-            reste2 = re.split(r'BONNES_REPONSES\s*:', reste, flags=re.IGNORECASE)[1]
-            r_part = re.split(r'EXPLICATION\s*:', reste2, flags=re.IGNORECASE)[0].strip()
+            q_part = bloc[:m_choix.start()].strip()
+            c_part = bloc[m_choix.end():m_rep.start()].strip()
+            r_part = bloc[m_rep.end():m_exp.start()].strip()
+            e_part = bloc[m_exp.end():].strip()
             
-            e_part = re.split(r'EXPLICATION\s*:', reste2, flags=re.IGNORECASE)[1].strip()
+            # Nettoyage profond (retire les puces -, *, 1., A), etc. devant les phrases)
+            choix_lignes = [re.sub(r'^[-*•]\s*|^\d+[\.\)]\s*|^[A-Ea-e][\.\)]\s*', '', c).strip() for c in c_part.split('\n') if c.strip()]
+            rep_lignes = [re.sub(r'^[-*•]\s*|^\d+[\.\)]\s*|^[A-Ea-e][\.\)]\s*', '', r).strip() for r in r_part.split('\n') if r.strip()]
             
-            # Nettoyage des tirets, puces ou numéros (ex: "1.", "-", "A)") pour un matching parfait
-            choix_lignes = [re.sub(r'^[-*•\d\.\)]+\s*', '', c).strip() for c in c_part.split('\n') if c.strip()]
-            rep_lignes = [re.sub(r'^[-*•\d\.\)]+\s*', '', r).strip() for r in r_part.split('\n') if r.strip()]
-            
-            # On n'ajoute la question que si elle a toutes ses parties intactes
             if q_part and len(choix_lignes) >= 2 and rep_lignes:
                 questions.append({
                     "type": "QRM",
@@ -106,20 +101,19 @@ def parser_texte_naturel(texte_ia):
                     "choix": choix_lignes,
                     "bonnes_reponses": rep_lignes,
                     "explication": [e_part],
-                    "indice": "Relis attentivement les détails cliniques de chaque proposition...",
-                    "mnemotechnique": "Concentre-toi sur les mots-clés du cours."
+                    "indice": "Relis attentivement les détails cliniques de chaque proposition.",
+                    "mnemotechnique": "Concentre-toi sur les mots-clés majeurs du cours."
                 })
         except Exception:
-            # SI L'IA COUPE LE TEXTE ICI (LIMITE DE MOTS ATTEINTE), ON L'IGNORE SANS FAIRE PLANTER LE SITE
-            continue 
+            continue
             
     if not questions:
-        raise Exception(f"L'IA n'a pas respecté le format demandé ou le filtre de sécurité a bloqué la réponse. Voici un extrait pour comprendre :\n\n{texte_ia[:400]}")
+        raise Exception(f"L'IA a utilisé un format indéchiffrable. Voici ce qu'elle a répondu :\n\n{texte_ia[:500]}")
         
     return {"questions": questions}
 
 # ==============================================================================
-# 3. Moteur IA (Format Examen Brut - Fini le JSON)
+# 3. Moteur IA (Format Examen Vétérinaire Officiel)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Tu es un Professeur de médecine vétérinaire, spécialisé EXCLUSIVEMENT en pathologie et biologie infectieuse.
@@ -139,7 +133,8 @@ STYLE DE QUESTION (CALQUÉ SUR LES EXAMENS VÉTÉRINAIRES OFFICIELS) :
 
 RÈGLE INFORMATIQUE ABSOLUE (FORMAT TEXTE STRICT) :
 TU NE DOIS JAMAIS UTILISER LE FORMAT JSON.
-Tu dois formater CHAQUE question EXACTEMENT comme le modèle ci-dessous. N'utilise pas d'accolades.
+NE FAIS AUCUNE PHRASE D'INTRODUCTION. Ne dis pas "Bonjour" ni "Voici les questions". COMMENCE IMMÉDIATEMENT par le mot "QUESTION :".
+Tu dois formater CHAQUE question EXACTEMENT comme le modèle ci-dessous :
 
 QUESTION:
 [Texte de l'amorce ou de la situation clinique]
@@ -175,9 +170,7 @@ def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est
         "generationConfig": {
             "temperature": 0.2, 
             "maxOutputTokens": 8192
-            # Fin de la prison JSON. L'IA respire.
         },
-        # Abaissement des filtres de sécurité pour autoriser le vocabulaire médical/abattoir
         "safetySettings": [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
             {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
@@ -195,7 +188,7 @@ def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm, est
     try:
         texte_ia = rep.json()['candidates'][0]['content']['parts'][0]['text']
     except KeyError:
-        raise Exception(f"Le filtre de sécurité de l'IA a bloqué la génération (vocabulaire médical perçu comme violent). Essaie d'analyser d'autres pages.")
+        raise Exception("Le filtre de sécurité de l'IA a bloqué la génération (vocabulaire perçu comme trop clinique). Essaie d'analyser d'autres pages.")
         
     return parser_texte_naturel(texte_ia)
 
@@ -222,7 +215,7 @@ if f_pdf:
     doc_t.close()
     
     with st.form("formulaire_generation"):
-        st.warning("⚠️ Astuce : Analyse des blocs de 3 à 6 pages maximum. Le bouclier anti-coupure est activé.")
+        st.warning("⚠️ Astuce : Analyse des blocs de 3 à 6 pages maximum. L'extracteur intelligent (Regex) est activé.")
         p_deb, p_fin = st.slider("Pages à analyser :", 1, p_tot, (1, min(5, p_tot)))
         bouton_generer = st.form_submit_button("🚀 Générer le Test", type="primary", use_container_width=True)
         
@@ -230,7 +223,7 @@ if f_pdf:
             if not api_key: 
                 st.error("Clé API manquante ! Renseigne-la dans la barre latérale.")
             else:
-                with st.spinner(f"Génération de {nombre_qcm} questions avancées (Protection Anti-Crash activée)..."):
+                with st.spinner(f"Génération de {nombre_qcm} questions avancées (Extracteur Intelligent activé)..."):
                     try:
                         images = extraire_images_pdf(f_pdf, p_deb, p_fin)
                         txt_w = lire_word(f_word) if f_word else ""
@@ -253,7 +246,7 @@ if 'data' in st.session_state:
             st.session_state['reponses_utilisateur'] = {}
         
         for i, q in enumerate(liste_questions):
-            question_propre = nettoyer_question(q.get('question', ''))
+            question_propre = q.get('question', '')
             st.markdown(f"**Question {i+1}** 🔹 {question_propre}")
             st.caption("*Il peut y avoir plusieurs bonnes réponses.*")
             
@@ -273,9 +266,9 @@ if 'data' in st.session_state:
             if not is_disabled and not mode_examen:
                 col_h1, col_h2 = st.columns(2)
                 with col_h1:
-                    with st.expander("💡 Aide de réflexion"): st.info(nettoyer_question(q.get('indice', 'Pas d indice.')))
+                    with st.expander("💡 Aide de réflexion"): st.info(q.get('indice', 'Pas d indice.'))
                 with col_h2:
-                    with st.expander("🧠 Mnémotechnique"): st.warning(nettoyer_question(q.get('mnemotechnique', 'Rien.')))
+                    with st.expander("🧠 Mnémotechnique"): st.warning(q.get('mnemotechnique', 'Rien.'))
             
             if is_disabled:
                 reponse_soumise = set(st.session_state['reponses_utilisateur'].get(f"q_{i}", []))
