@@ -119,8 +119,8 @@ def parser_texte_naturel(texte_ia):
                 "choix": choix_list,
                 "bonnes_reponses": bonnes_reponses_list,
                 "explication": [exp if exp else "Explication non générée."],
-                "indice": "Relis attentivement les détails cliniques ou biologiques de chaque proposition.",
-                "mnemotechnique": "Concentre-toi sur les mots-clés majeurs du cours."
+                "indice": "Relis attentivement les mots-clés de chaque proposition.",
+                "mnemotechnique": "Concentre-toi sur les termes spécifiques du cours."
             })
             
         except Exception:
@@ -135,41 +135,49 @@ SYSTEM_PROMPT = """
 Tu es un Professeur de médecine vétérinaire, spécialisé EXCLUSIVEMENT en pathologie et biologie infectieuse.
 Matière : {matiere} | Difficulté : {difficulte}/10.
 
-MISSION :
-Tu dois générer EXACTEMENT {nb_qcm} questions à réponses multiples (QRM). 
+MISSION (COMPTAGE OBLIGATOIRE) :
+Tu dois générer EXACTEMENT {nb_qcm} questions à réponses multiples (QRM). Pas une de moins.
+Tu DOIS numéroter chaque balise de début de question (ex: @DEBUT_QUESTION 1/{nb_qcm}, @DEBUT_QUESTION 2/{nb_qcm}...).
+C'EST UN ORDRE STRICT : Tu ne dois pas t'arrêter avant d'avoir atteint la question {nb_qcm}/{nb_qcm}.
 
 RÈGLE D'OR (ANTI-HALLUCINATION) : 
 INTERDICTION ABSOLUE d'utiliser tes propres connaissances. Base-toi EXCLUSIVEMENT sur les images du document. 
 
-RÉPARTITION 50/50 OBLIGATOIRE :
-Génère un mélange de TYPE 1 et TYPE 2. Il y a TOUJOURS 5 choix longs par question.
+RÉFÉRENCE DE STYLE OBLIGATOIRE (QUESTIONS COURTES ET DIRECTES) :
+Conforme tes questions EXACTEMENT à l'exigence et au style du document "exam-mip-janvier-2022.pdf".
+- Les questions doivent être BEAUCOUP PLUS COURTES ET DIRECTES (ex: "Temps d'incubation de la pneumonie progressive ovine ?", "Quel parasite provoque de la diarrhée chez le porcelet de 1 à 3 semaines ?").
+- LES CHOIX : EXACTEMENT 5 propositions par question. Les propositions doivent être TRÈS COURTES (1 à 5 mots maximum en général : un nom de maladie, un type de cellule, une durée, un organe, etc.).
+- Il peut y avoir UNE ou PLUSIEURS bonnes réponses.
 
-TYPE 1 : CAS CLINIQUE DE DÉDUCTION (SANS DIAGNOSTIC)
-- L'AMORCE : Décris une situation clinique (espèce, symptômes, contexte) SANS DONNER LE DIAGNOSTIC.
-- CHOIX : Déductions diagnostiques, théories, examens ou thérapeutiques logiques.
+RÉPARTITION DES QUESTIONS (50/50 OBLIGATOIRE) :
+Génère environ 50% de questions de TYPE 1 et 50% de questions de TYPE 2. 
 
-TYPE 2 : PATHOLOGIE/BIOLOGIE (AVEC DIAGNOSTIC CONNU)
-- L'AMORCE : Donne directement le diagnostic.
-- CHOIX : Phrases très longues, denses et techniques sur la biologie et le cycle de l'agent.
+TYPE 1 : CAS CLINIQUE DE DÉDUCTION RAPIDE (SANS DIAGNOSTIC)
+- L'AMORCE : Décris une situation clinique très brièvement en 1 ou 2 phrases (espèce, symptômes majeurs) SANS DONNER LE DIAGNOSTIC.
+- LES CHOIX : Des noms de maladies, d'agents pathogènes ou d'examens (très courts).
+
+TYPE 2 : PATHOLOGIE/BIOLOGIE DIRECTE (AVEC DIAGNOSTIC CONNU)
+- L'AMORCE : Pose une question théorique directe ou cite directement le pathogène/la maladie.
+- LES CHOIX : Des mots-clés, durées, vecteurs, modes de transmission ou termes biologiques très courts.
 
 RÈGLE INFORMATIQUE (BALISES STRICTES) :
-@DEBUT_QUESTION
+@DEBUT_QUESTION 1/{nb_qcm}
 @AMORCE
-[Ton texte d'introduction]
+[Ton texte d'introduction court]
 @CHOIX_1
-[Texte détaillé du choix 1]
+[Choix très court 1]
 @CHOIX_2
-[Texte détaillé du choix 2]
+[Choix très court 2]
 @CHOIX_3
-[Texte détaillé du choix 3]
+[Choix très court 3]
 @CHOIX_4
-[Texte détaillé du choix 4]
+[Choix très court 4]
 @CHOIX_5
-[Texte détaillé du choix 5]
+[Choix très court 5]
 @REPONSES_CORRECTES
 [Numéros des bonnes réponses, ex: 1, 4]
 @EXPLICATION
-[Ton explication détaillée]
+[Ton explication concise]
 @FIN_QUESTION
 """
 
@@ -189,8 +197,8 @@ def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm_cibl
     while len(questions_accumulees) < nombre_qcm_cible and tentative < max_tentatives:
         qcm_manquants = nombre_qcm_cible - len(questions_accumulees)
         
-        # On ne lui demande que 3 questions MAXIMUM par requête pour qu'elle ne coupe JAMAIS son texte
-        nb_a_demander = min(qcm_manquants, 3) 
+        # On peut demander plus de questions d'un coup vu qu'elles sont plus courtes (ex: 5 max)
+        nb_a_demander = min(qcm_manquants, 5) 
         
         st_progress.info(f"⏳ L'IA rédige minutieusement tes questions... ({len(questions_accumulees)} / {nombre_qcm_cible} prêtes)")
         
