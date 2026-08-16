@@ -27,19 +27,20 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Paliers de difficulte (utilises REELLEMENT dans le prompt)
+# 2. Paliers de difficulte (n'affectent JAMAIS le nombre de bonnes reponses,
+#    uniquement la finesse du detail exige et la proximite des distracteurs)
 # ==============================================================================
 PALIERS_DIFFICULTE = {
-    1: "Tres facile : questions de definition pure, une seule bonne reponse evidente, distracteurs grossierement faux.",
-    2: "Facile : vocabulaire de base, une seule bonne reponse, distracteurs peu proches semantiquement.",
-    3: "Facile+ : rappel de cours direct, une seule bonne reponse, distracteurs plausibles mais clairement ecartables.",
-    4: "Intermediaire- : necessite de connaitre une nuance du cours, 1 bonne reponse, distracteurs proches thematiquement.",
-    5: "Intermediaire : melange de rappel et de deduction courte, 1 a 2 bonnes reponses possibles, distracteurs credibles.",
-    6: "Intermediaire+ : deduction clinique courte necessaire, 1 a 2 bonnes reponses, distracteurs tres proches (meme famille de pathogenes/symptomes).",
-    7: "Difficile- : cas clinique avec plusieurs indices a croiser, souvent 2 bonnes reponses, distracteurs quasi identiques semantiquement.",
-    8: "Difficile : necessite de croiser plusieurs notions du document, 2 bonnes reponses frequentes, distracteurs pieges (confusions classiques).",
-    9: "Tres difficile : details precis et chiffres du document (durees, doses, prevalences), 2 a 3 bonnes reponses possibles, distracteurs quasi indiscernables sans une lecture fine.",
-    10: "Expert : niveau examen final, exige la memorisation exacte de details secondaires du document, jusqu'a 3 bonnes reponses, distracteurs concus pour pieger une confusion classique entre pathologies proches.",
+    1: "Tres facile : rappel de definition pure, distracteurs grossierement faux et faciles a ecarter.",
+    2: "Facile : vocabulaire de base du document, distracteurs peu proches semantiquement.",
+    3: "Facile+ : rappel de cours direct, distracteurs plausibles mais clairement ecartables a la lecture.",
+    4: "Intermediaire- : necessite de connaitre une nuance du cours, distracteurs proches thematiquement.",
+    5: "Intermediaire : melange de rappel et de deduction courte, distracteurs credibles.",
+    6: "Intermediaire+ : deduction clinique courte necessaire, distracteurs tres proches (meme famille de pathogenes/symptomes).",
+    7: "Difficile- : cas clinique avec plusieurs indices a croiser, distracteurs quasi identiques semantiquement.",
+    8: "Difficile : necessite de croiser plusieurs notions du document, distracteurs pieges (confusions classiques).",
+    9: "Tres difficile : details precis et chiffres du document (durees, doses, prevalences), distracteurs quasi indiscernables sans une lecture fine.",
+    10: "Expert : niveau examen final, exige la memorisation exacte de details secondaires du document, distracteurs concus pour pieger une confusion classique entre pathologies proches.",
 }
 
 # ==============================================================================
@@ -127,6 +128,9 @@ def parser_texte_naturel(texte_ia):
                     if c and c.lower()[:20] in rep_text.lower():
                         bonnes_reponses_list.append(c)
 
+            # On rejette uniquement si aucune bonne reponse n'est identifiable.
+            # Le nombre de bonnes reponses (1 a 5) est libre et aleatoire, on ne
+            # force plus de minimum ni de maximum ici.
             if not bonnes_reponses_list:
                 blocs_rejetes += 1
                 continue
@@ -154,8 +158,16 @@ SYSTEM_PROMPT = """
 Tu es un Professeur de medecine veterinaire, specialise EXCLUSIVEMENT en pathologie et biologie infectieuse.
 Matiere : {matiere} | Difficulte demandee : {difficulte}/10.
 
-CONSIGNE DE DIFFICULTE (A RESPECTER STRICTEMENT) :
+CONSIGNE DE DIFFICULTE (A RESPECTER STRICTEMENT, N'AFFECTE JAMAIS LE NOMBRE DE BONNES REPONSES) :
 {description_difficulte}
+
+REGLE SUR LE NOMBRE DE BONNES REPONSES (ALEATOIRE, INDEPENDANT DE LA DIFFICULTE) :
+Pour CHAQUE question, le nombre de bonnes reponses parmi les 5 propositions doit etre choisi de maniere
+ALEATOIRE et VARIEE, strictement compris entre 1 et 5 (donc 1, 2, 3 ou 4 bonnes reponses possibles).
+Ne repete pas systematiquement le meme nombre de bonnes reponses d'une question a l'autre : varie-le
+reellement au fil du questionnaire. Ce nombre ne doit JAMAIS etre determine ou influence par le niveau
+de difficulte : la difficulte ne joue que sur la proximite semantique des distracteurs et la finesse du
+detail exige dans le document.
 
 MISSION (COMPTAGE OBLIGATOIRE) :
 Tu dois generer EXACTEMENT {nb_qcm} questions a reponses multiples (QRM). Pas une de moins.
@@ -175,7 +187,7 @@ Ne produis JAMAIS une question ou une reponse basee sur une lecture incertaine d
 STYLE OBLIGATOIRE (QUESTIONS COURTES ET DIRECTES) :
 - Les questions doivent etre courtes et directes (ex: "Temps d'incubation de la pneumonie progressive ovine ?", "Quel parasite provoque de la diarrhee chez le porcelet de 1 a 3 semaines ?").
 - LES CHOIX : EXACTEMENT 5 propositions par question. Propositions TRES COURTES (1 a 5 mots maximum : nom de maladie, type de cellule, duree, organe, etc.).
-- Le nombre de bonnes reponses doit respecter la consigne de difficulte ci-dessus.
+- RAPPEL : varie librement le nombre de bonnes reponses (entre 1 et 4) d'une question a l'autre, sans lien avec la difficulte.
 
 REPARTITION DES QUESTIONS (50/50 OBLIGATOIRE) :
 Genere environ 50% de questions de TYPE 1 et 50% de questions de TYPE 2.
@@ -356,6 +368,7 @@ with st.sidebar:
     matiere = st.selectbox("Matiere :", ["Bacteriologie / Virologie", "Parasitologie / Pathologie", "Gestion de clinique"])
     difficulte = st.slider("Niveau de difficulte :", 1, 10, 5)
     st.caption(f"📋 {PALIERS_DIFFICULTE[difficulte]}")
+    st.caption("ℹ️ Le nombre de bonnes reponses (1 a 4 sur 5) est aleatoire pour chaque question, independamment de la difficulte.")
     nombre_qcm = st.number_input("Nombre de Questions :", 1, 30, 10)
     mode_examen = st.toggle("🚨 Mode Examen (Masquer les indices)")
     st.divider()
@@ -427,7 +440,7 @@ if 'data' in st.session_state:
         for i, q in enumerate(liste_questions):
             question_propre = q.get('question', '')
             st.markdown(f"**Question {i+1}** 🔹 {question_propre}")
-            st.caption("*Il peut y avoir plusieurs bonnes reponses.*")
+            st.caption("*Le nombre de bonnes reponses varie a chaque question.*")
 
             choix = q.get('choix', [])
 
