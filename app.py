@@ -10,7 +10,7 @@ import time
 # ==============================================================================
 # 1. Configuration et Design
 # ==============================================================================
-st.set_page_config(page_title="Masterclass Vétérinaire", page_icon="🐾", layout="wide")
+st.set_page_config(page_title="Masterclass Veterinaire", page_icon="🐾", layout="wide")
 
 st.markdown("""
 <style>
@@ -27,19 +27,19 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Paliers de difficulté (utilisés RÉELLEMENT dans le prompt)
+# 2. Paliers de difficulte (utilises REELLEMENT dans le prompt)
 # ==============================================================================
 PALIERS_DIFFICULTE = {
-    1: "Très facile : questions de définition pure, une seule bonne réponse évidente, distracteurs grossièrement faux.",
-    2: "Facile : vocabulaire de base, une seule bonne réponse, distracteurs peu proches sémantiquement.",
-    3: "Facile+ : rappel de cours direct, une seule bonne réponse, distracteurs plausibles mais clairement écartables.",
-    4: "Intermédiaire- : nécessite de connaître une nuance du cours, 1 bonne réponse, distracteurs proches thématiquement.",
-    5: "Intermédiaire : mélange de rappel et de déduction courte, 1 à 2 bonnes réponses possibles, distracteurs crédibles.",
-    6: "Intermédiaire+ : déduction clinique courte nécessaire, 1 à 2 bonnes réponses, distracteurs très proches (même famille de pathogènes/symptômes).",
-    7: "Difficile- : cas clinique avec plusieurs indices à croiser, souvent 2 bonnes réponses, distracteurs quasi identiques sémantiquement.",
-    8: "Difficile : nécessite de croiser plusieurs notions du document, 2 bonnes réponses fréquentes, distracteurs pièges (confusions classiques).",
-    9: "Très difficile : détails précis et chiffrés du document (durées, doses, prévalences), 2 à 3 bonnes réponses possibles, distracteurs quasi indiscernables sans une lecture fine.",
-    10: "Expert : niveau examen final, exige la mémorisation exacte de détails secondaires du document, jusqu'à 3 bonnes réponses, distracteurs conçus pour piéger une confusion classique entre pathologies proches.",
+    1: "Tres facile : questions de definition pure, une seule bonne reponse evidente, distracteurs grossierement faux.",
+    2: "Facile : vocabulaire de base, une seule bonne reponse, distracteurs peu proches semantiquement.",
+    3: "Facile+ : rappel de cours direct, une seule bonne reponse, distracteurs plausibles mais clairement ecartables.",
+    4: "Intermediaire- : necessite de connaitre une nuance du cours, 1 bonne reponse, distracteurs proches thematiquement.",
+    5: "Intermediaire : melange de rappel et de deduction courte, 1 a 2 bonnes reponses possibles, distracteurs credibles.",
+    6: "Intermediaire+ : deduction clinique courte necessaire, 1 a 2 bonnes reponses, distracteurs tres proches (meme famille de pathogenes/symptomes).",
+    7: "Difficile- : cas clinique avec plusieurs indices a croiser, souvent 2 bonnes reponses, distracteurs quasi identiques semantiquement.",
+    8: "Difficile : necessite de croiser plusieurs notions du document, 2 bonnes reponses frequentes, distracteurs pieges (confusions classiques).",
+    9: "Tres difficile : details precis et chiffres du document (durees, doses, prevalences), 2 a 3 bonnes reponses possibles, distracteurs quasi indiscernables sans une lecture fine.",
+    10: "Expert : niveau examen final, exige la memorisation exacte de details secondaires du document, jusqu'a 3 bonnes reponses, distracteurs concus pour pieger une confusion classique entre pathologies proches.",
 }
 
 # ==============================================================================
@@ -66,7 +66,6 @@ def extraire_images_pdf(fichier_bytes, page_debut, page_fin):
     doc = fitz.open(stream=fichier_bytes, filetype="pdf")
     images_parts = []
     for i in range(page_debut - 1, min(page_fin, len(doc))):
-        # Résolution 1.5x : bon compromis lisibilité manuscrite / poids du payload.
         pix = doc[i].get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
         img_b64 = base64.b64encode(pix.tobytes("jpeg")).decode("utf-8")
         images_parts.append({
@@ -128,8 +127,6 @@ def parser_texte_naturel(texte_ia):
                     if c and c.lower()[:20] in rep_text.lower():
                         bonnes_reponses_list.append(c)
 
-            # Si on ne peut vraiment pas identifier la bonne réponse, on rejette
-            # la question plutôt que de deviner.
             if not bonnes_reponses_list:
                 blocs_rejetes += 1
                 continue
@@ -139,9 +136,9 @@ def parser_texte_naturel(texte_ia):
                 "question": amorce,
                 "choix": choix_list,
                 "bonnes_reponses": bonnes_reponses_list,
-                "explication": [exp if exp else "Explication non générée."],
-                "indice": "Relis attentivement les mots-clés de chaque proposition.",
-                "mnemotechnique": "Concentre-toi sur les termes spécifiques du cours."
+                "explication": [exp if exp else "Explication non generee."],
+                "indice": "Relis attentivement les mots-cles de chaque proposition.",
+                "mnemotechnique": "Concentre-toi sur les termes specifiques du cours."
             })
 
         except Exception:
@@ -154,39 +151,348 @@ def parser_texte_naturel(texte_ia):
 # 4. Moteur IA
 # ==============================================================================
 SYSTEM_PROMPT = """
-Tu es un Professeur de médecine vétérinaire, spécialisé EXCLUSIVEMENT en pathologie et biologie infectieuse.
-Matière : {matiere} | Difficulté demandée : {difficulte}/10.
+Tu es un Professeur de medecine veterinaire, specialise EXCLUSIVEMENT en pathologie et biologie infectieuse.
+Matiere : {matiere} | Difficulte demandee : {difficulte}/10.
 
-CONSIGNE DE DIFFICULTÉ (À RESPECTER STRICTEMENT) :
+CONSIGNE DE DIFFICULTE (A RESPECTER STRICTEMENT) :
 {description_difficulte}
 
 MISSION (COMPTAGE OBLIGATOIRE) :
-Tu dois générer EXACTEMENT {nb_qcm} questions à réponses multiples (QRM). Pas une de moins.
-Tu DOIS numéroter chaque balise de début de question (ex: @DEBUT_QUESTION 1/{nb_qcm}, @DEBUT_QUESTION 2/{nb_qcm}...).
-C'EST UN ORDRE STRICT : Tu ne dois pas t'arrêter avant d'avoir atteint la question {nb_qcm}/{nb_qcm}.
+Tu dois generer EXACTEMENT {nb_qcm} questions a reponses multiples (QRM). Pas une de moins.
+Tu DOIS numeroter chaque balise de debut de question (ex: @DEBUT_QUESTION 1/{nb_qcm}, @DEBUT_QUESTION 2/{nb_qcm}...).
+C'EST UN ORDRE STRICT : Tu ne dois pas t'arreter avant d'avoir atteint la question {nb_qcm}/{nb_qcm}.
 
-RÈGLE D'OR (ANTI-HALLUCINATION) :
-INTERDICTION ABSOLUE d'utiliser tes propres connaissances générales pour inventer des faits absents du document.
+REGLE D'OR (ANTI-HALLUCINATION) :
+INTERDICTION ABSOLUE d'utiliser tes propres connaissances generales pour inventer des faits absents du document.
 Base-toi EXCLUSIVEMENT sur le contenu des images/notes fournies.
 
-RÈGLE ÉCRITURE MANUSCRITE (PRUDENCE OBLIGATOIRE) :
-Les images peuvent contenir de l'écriture manuscrite partiellement illisible. Si un mot, un chiffre ou un terme
-clé est ambigu ou illisible sur l'image, NE DEVINE PAS et N'INVENTE PAS une lecture plausible.
+REGLE ECRITURE MANUSCRITE (PRUDENCE OBLIGATOIRE) :
+Les images peuvent contenir de l'ecriture manuscrite partiellement illisible. Si un mot, un chiffre ou un terme
+cle est ambigu ou illisible sur l'image, NE DEVINE PAS et N'INVENTE PAS une lecture plausible.
 Dans ce cas, ignore ce passage et base ta question sur une autre partie du document que tu peux lire avec certitude.
-Ne produis JAMAIS une question ou une réponse basée sur une lecture incertaine d'un mot manuscrit.
+Ne produis JAMAIS une question ou une reponse basee sur une lecture incertaine d'un mot manuscrit.
 
 STYLE OBLIGATOIRE (QUESTIONS COURTES ET DIRECTES) :
-- Les questions doivent être courtes et directes (ex: "Temps d'incubation de la pneumonie progressive ovine ?", "Quel parasite provoque de la diarrhée chez le porcelet de 1 à 3 semaines ?").
-- LES CHOIX : EXACTEMENT 5 propositions par question. Propositions TRÈS COURTES (1 à 5 mots maximum : nom de maladie, type de cellule, durée, organe, etc.).
-- Le nombre de bonnes réponses doit respecter la consigne de difficulté ci-dessus.
+- Les questions doivent etre courtes et directes (ex: "Temps d'incubation de la pneumonie progressive ovine ?", "Quel parasite provoque de la diarrhee chez le porcelet de 1 a 3 semaines ?").
+- LES CHOIX : EXACTEMENT 5 propositions par question. Propositions TRES COURTES (1 a 5 mots maximum : nom de maladie, type de cellule, duree, organe, etc.).
+- Le nombre de bonnes reponses doit respecter la consigne de difficulte ci-dessus.
 
-RÉPARTITION DES QUESTIONS (50/50 OBLIGATOIRE) :
-Génère environ 50% de questions de TYPE 1 et 50% de questions de TYPE 2.
+REPARTITION DES QUESTIONS (50/50 OBLIGATOIRE) :
+Genere environ 50% de questions de TYPE 1 et 50% de questions de TYPE 2.
 
-TYPE 1 : CAS CLINIQUE DE DÉDUCTION RAPIDE (SANS DIAGNOSTIC)
-- L'AMORCE : Décris une situation clinique très brièvement (espèce, symptômes majeurs) SANS DONNER LE DIAGNOSTIC.
-- LES CHOIX : Des noms de maladies, d'agents pathogènes ou d'examens (très courts).
+TYPE 1 : CAS CLINIQUE DE DEDUCTION RAPIDE (SANS DIAGNOSTIC)
+- L'AMORCE : Decris une situation clinique tres brievement (espece, symptomes majeurs) SANS DONNER LE DIAGNOSTIC.
+- LES CHOIX : Des noms de maladies, d'agents pathogenes ou d'examens (tres courts).
 
 TYPE 2 : PATHOLOGIE/BIOLOGIE DIRECTE (AVEC DIAGNOSTIC CONNU)
-- L'AMORCE : Pose une question théorique directe ou cite directement le pathogène/la maladie.
-- LES CHOIX : Des mots-clés,
+- L'AMORCE : Pose une question theorique directe ou cite directement le pathogene/la maladie.
+- LES CHOIX : Des mots-cles, durees, vecteurs, modes de transmission ou termes biologiques tres courts.
+
+REGLE INFORMATIQUE (BALISES STRICTES, NE JAMAIS EN OMETTRE UNE) :
+@DEBUT_QUESTION 1/{nb_qcm}
+@AMORCE
+[Ton texte d'introduction court]
+@CHOIX_1
+[Choix tres court 1]
+@CHOIX_2
+[Choix tres court 2]
+@CHOIX_3
+[Choix tres court 3]
+@CHOIX_4
+[Choix tres court 4]
+@CHOIX_5
+[Choix tres court 5]
+@REPONSES_CORRECTES
+[Numeros des bonnes reponses, ex: 1, 4]
+@EXPLICATION
+[Ton explication concise]
+@FIN_QUESTION
+"""
+
+MODELE_PRINCIPAL = "gemini-2.5-flash-lite"
+MODELE_FALLBACK = "gemini-2.5-flash"
+
+def construire_url(nom_modele):
+    return f"https://generativelanguage.googleapis.com/v1beta/models/{nom_modele}:generateContent"
+
+def appeler_gemini(session, url_base, cle_propre, prompt_text, images_pdf, texte_word):
+    parts = [{"text": prompt_text + "\nVoici les pages du cours a analyser :\n"}]
+    parts.extend(images_pdf)
+    if texte_word:
+        parts.append({"text": "\nNOTES SUPPLEMENTAIRES :\n" + texte_word})
+
+    payload = {
+        "contents": [{"parts": parts}],
+        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 8192},
+        "safetySettings": [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"}
+        ]
+    }
+
+    rep = session.post(url_base, params={"key": cle_propre}, json=payload, timeout=90)
+
+    if rep.status_code == 429:
+        raise RuntimeError("QUOTA_DEPASSE")
+    if rep.status_code == 400:
+        detail = ""
+        try:
+            detail = rep.json().get("error", {}).get("message", "")
+        except Exception:
+            pass
+        raise RuntimeError(f"REQUETE_INVALIDE: {detail}")
+    if rep.status_code != 200:
+        raise RuntimeError(f"ERREUR_HTTP_{rep.status_code}: {rep.text[:200]}")
+
+    data = rep.json()
+    candidats = data.get("candidates", [])
+    if not candidats:
+        raise RuntimeError("REPONSE_VIDE (probablement bloquee par les filtres de securite)")
+
+    return candidats[0]["content"]["parts"][0]["text"]
+
+
+def generer_donnees(images_pdf, texte_word, matiere, difficulte, nombre_qcm_cible, api_key, st_progress):
+    cle_propre = api_key.strip()
+    if not cle_propre:
+        raise Exception("Cle API vide.")
+
+    session = requests.Session()
+    session.trust_env = False
+
+    description_difficulte = PALIERS_DIFFICULTE.get(int(difficulte), PALIERS_DIFFICULTE[5])
+
+    questions_accumulees = []
+    total_rejets = 0
+    tentative = 0
+    max_tentatives = 8
+    quota_atteint = False
+    modele_courant = MODELE_PRINCIPAL
+    bascule_effectuee = False
+
+    while len(questions_accumulees) < nombre_qcm_cible and tentative < max_tentatives:
+        qcm_manquants = nombre_qcm_cible - len(questions_accumulees)
+        nb_a_demander = min(qcm_manquants, 5)
+
+        st_progress.info(
+            f"⏳ Generation via {modele_courant}... ({len(questions_accumulees)}/{nombre_qcm_cible} questions pretes, "
+            f"tentative {tentative + 1}/{max_tentatives})"
+        )
+
+        prompt = SYSTEM_PROMPT.format(
+            matiere=matiere,
+            difficulte=difficulte,
+            description_difficulte=description_difficulte,
+            nb_qcm=nb_a_demander
+        )
+
+        url_base = construire_url(modele_courant)
+
+        try:
+            texte_ia = appeler_gemini(session, url_base, cle_propre, prompt, images_pdf, texte_word)
+            resultat = parser_texte_naturel(texte_ia)
+            questions_accumulees.extend(resultat["questions"])
+            total_rejets += resultat["rejets"]
+
+        except RuntimeError as e:
+            msg = str(e)
+            if msg == "QUOTA_DEPASSE":
+                quota_atteint = True
+                if modele_courant == MODELE_PRINCIPAL and not bascule_effectuee:
+                    modele_courant = MODELE_FALLBACK
+                    bascule_effectuee = True
+                    st_progress.warning(
+                        f"⚠️ Quota {MODELE_PRINCIPAL} atteint (429). Bascule automatique sur {MODELE_FALLBACK}..."
+                    )
+                else:
+                    st_progress.warning("⚠️ Quota API atteint (429) sur les deux modeles. Nouvelle tentative dans 20s...")
+                    time.sleep(20)
+            elif msg.startswith("REQUETE_INVALIDE"):
+                if modele_courant == MODELE_PRINCIPAL and not bascule_effectuee:
+                    modele_courant = MODELE_FALLBACK
+                    bascule_effectuee = True
+                    st_progress.warning(f"⚠️ {MODELE_PRINCIPAL} a refuse la requete. Bascule sur {MODELE_FALLBACK}...")
+                else:
+                    raise Exception(
+                        f"Requete refusee par l'API ({msg}). Verifie que ta cle est valide "
+                        f"et que le nombre de pages selectionnees n'est pas trop eleve."
+                    )
+            else:
+                time.sleep(3)
+
+        except Exception:
+            time.sleep(3)
+
+        tentative += 1
+
+    if not questions_accumulees:
+        if quota_atteint:
+            raise Exception(
+                "Quota API depasse (429) sur flash-lite et flash apres plusieurs tentatives. "
+                "Attends quelques minutes ou reduis le nombre de questions/pages demandees."
+            )
+        raise Exception(
+            f"Impossible de generer des questions valides ({total_rejets} blocs rejetes par le parseur). "
+            f"Verifie tes pages PDF (texte manuscrit trop illisible ?) ou reessaie."
+        )
+
+    if len(questions_accumulees) < nombre_qcm_cible:
+        st_progress.warning(
+            f"⚠️ Seulement {len(questions_accumulees)}/{nombre_qcm_cible} questions valides generees "
+            f"apres {tentative} tentative(s) ({total_rejets} blocs rejetes par le parseur)."
+        )
+        time.sleep(2)
+
+    return {"questions": questions_accumulees[:nombre_qcm_cible]}
+
+# ==============================================================================
+# 5. Interface Graphique
+# ==============================================================================
+with st.sidebar:
+    st.header("⚙️ Configuration")
+    api_key = st.text_input("Cle API Gemini :", type="password")
+    matiere = st.selectbox("Matiere :", ["Bacteriologie / Virologie", "Parasitologie / Pathologie", "Gestion de clinique"])
+    difficulte = st.slider("Niveau de difficulte :", 1, 10, 5)
+    st.caption(f"📋 {PALIERS_DIFFICULTE[difficulte]}")
+    nombre_qcm = st.number_input("Nombre de Questions :", 1, 30, 10)
+    mode_examen = st.toggle("🚨 Mode Examen (Masquer les indices)")
+    st.divider()
+    st.caption(
+        f"💡 Modele principal : **{MODELE_PRINCIPAL}** (quotas gratuits plus larges). "
+        f"Bascule automatique sur **{MODELE_FALLBACK}** en cas de quota depasse ou d'erreur. "
+        f"Chaque page envoyee (surtout manuscrite) coute ~1100 tokens d'image."
+    )
+
+st.title("🐾 Simulateur d'Entrainement Veterinaire (Infectiologie)")
+st.caption("📝 Compatible cours manuscrits scannes : les pages sont envoyees en image pour une lecture fidele par l'IA.")
+
+c1, c2 = st.columns(2)
+with c1:
+    f_pdf = st.file_uploader("1. PDF du cours (Scans/Notes, manuscrit ou imprime)", type=['pdf'])
+with c2:
+    f_word = st.file_uploader("2. Notes Word (Opt.)", type=['docx'])
+
+if f_pdf:
+    pdf_bytes = f_pdf.getvalue()
+    doc_t = fitz.open(stream=pdf_bytes, filetype="pdf")
+    p_tot = len(doc_t)
+    doc_t.close()
+
+    with st.form("formulaire_generation"):
+        p_deb, p_fin = st.slider("Pages a analyser :", 1, p_tot, (1, min(5, p_tot)))
+        nb_pages_selectionnees = p_fin - p_deb + 1
+        if nb_pages_selectionnees > 15:
+            st.warning(
+                f"⚠️ {nb_pages_selectionnees} pages selectionnees : cela consomme beaucoup de tokens "
+                f"(surtout si ecriture manuscrite) et peut declencher le quota plus vite. "
+                f"5 a 10 pages est un bon compromis."
+            )
+        bouton_generer = st.form_submit_button("🚀 Generer le Test", type="primary", use_container_width=True)
+
+        if bouton_generer:
+            if not api_key:
+                st.error("Cle API manquante ! Renseigne-la dans la barre laterale.")
+            else:
+                st_progress = st.empty()
+                try:
+                    images = extraire_images_pdf(pdf_bytes, p_deb, p_fin)
+                    txt_w = lire_word(f_word) if f_word else ""
+
+                    donnees = generer_donnees(images, txt_w, matiere, difficulte, nombre_qcm, api_key, st_progress)
+
+                    st_progress.success(f"✅ Generation terminee : {len(donnees['questions'])} questions pretes !")
+                    st.session_state['data'] = donnees
+                    st.session_state['examen_soumis'] = False
+                    st.session_state['reponses_utilisateur'] = {}
+                    time.sleep(1.2)
+                    st_progress.empty()
+                    st.rerun()
+                except Exception as e:
+                    st_progress.empty()
+                    st.error(f"❌ {e}")
+
+if 'data' in st.session_state:
+    data = st.session_state['data']
+    t1, t2 = st.tabs(["✍️ Entrainement", "📓 Cahier d'Erreurs"])
+
+    with t1:
+        liste_questions = data.get('questions', [])
+        is_disabled = st.session_state.get('examen_soumis', False)
+
+        if 'reponses_utilisateur' not in st.session_state:
+            st.session_state['reponses_utilisateur'] = {}
+
+        for i, q in enumerate(liste_questions):
+            question_propre = q.get('question', '')
+            st.markdown(f"**Question {i+1}** 🔹 {question_propre}")
+            st.caption("*Il peut y avoir plusieurs bonnes reponses.*")
+
+            choix = q.get('choix', [])
+
+            if f"q_{i}" not in st.session_state['reponses_utilisateur']:
+                st.session_state['reponses_utilisateur'][f"q_{i}"] = []
+
+            reponses_cochees = []
+            for j, choix_texte in enumerate(choix):
+                coche = st.checkbox(choix_texte, key=f"chk_{i}_{j}", disabled=is_disabled)
+                if coche:
+                    reponses_cochees.append(choix_texte)
+
+            st.session_state['reponses_utilisateur'][f"q_{i}"] = reponses_cochees
+
+            if not is_disabled and not mode_examen:
+                col_h1, col_h2 = st.columns(2)
+                with col_h1:
+                    with st.expander("💡 Aide de reflexion"):
+                        st.info(q.get('indice', "Pas d'indice."))
+                with col_h2:
+                    with st.expander("🧠 Mnemotechnique"):
+                        st.warning(q.get('mnemotechnique', 'Rien.'))
+
+            if is_disabled:
+                reponse_soumise = set(st.session_state['reponses_utilisateur'].get(f"q_{i}", []))
+                bonnes_reps = set(q.get('bonnes_reponses', []))
+
+                if reponse_soumise == bonnes_reps and len(bonnes_reps) > 0:
+                    st.markdown("<div class='correct-box'>✅ <b>Parfait !</b></div>", unsafe_allow_html=True)
+                else:
+                    rep_str = "Aucune" if not reponse_soumise else " | ".join(reponse_soumise)
+                    bonnes_str = " | ".join(bonnes_reps)
+                    st.markdown(
+                        f"<div class='error-box'>❌ <b>Incomplet ou faux.</b><br>Tes choix : {rep_str}<br>"
+                        f"<b>Reponses attendues : {bonnes_str}</b></div>",
+                        unsafe_allow_html=True
+                    )
+                    ajouter_erreur_session(matiere, question_propre, rep_str, bonnes_str, assembler_texte_html(q.get('explication')))
+
+                with st.expander("Correction detaillee et Explications"):
+                    st.markdown(assembler_texte_html(q.get('explication')), unsafe_allow_html=True)
+            st.divider()
+
+        if is_disabled:
+            st.info("🎓 **Evaluation terminee.** Tes erreurs ont ete enregistrees dans le cahier.")
+            if st.button("🔄 Lancer un nouveau test", use_container_width=True):
+                st.session_state['examen_soumis'] = False
+                st.session_state['reponses_utilisateur'] = {}
+                st.rerun()
+        else:
+            if st.button("🏁 Corriger le test", type="primary", use_container_width=True):
+                st.session_state['examen_soumis'] = True
+                st.rerun()
+
+    with t2:
+        mem = st.session_state.get('cahier_memoire', {})
+        if not mem:
+            st.info("Aucune erreur enregistree.")
+        else:
+            for mat, errs in mem.items():
+                with st.expander(f"{mat} ({len(errs)} erreurs)"):
+                    for e in reversed(errs):
+                        st.markdown(
+                            f"<div class='erreur-log'><strong>{e['question']}</strong><br>"
+                            f"Ta selection : {e['choix_user']} <br> <b>Attendu : {e['bonnes_rep']}</b>"
+                            f"<br><br><small>{e['explication']}</small></div>",
+                            unsafe_allow_html=True
+                        )
